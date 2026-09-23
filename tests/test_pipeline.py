@@ -180,8 +180,67 @@ def test_pipeline_resumes_after_simulated_interruption(monkeypatch, tmp_path):
 def test_run_benchmark_dispatches_by_equation_and_rejects_unknown(tmp_path):
     with pytest.raises(ValueError, match="unknown equation"):
         pipeline._run_benchmark(
-            "unknown", pipeline.PipelineConfig(run_dir=tmp_path), Path("x")
+            "unknown",
+            pipeline.PipelineConfig(run_dir=tmp_path),
+            Path("x"),
+            pipeline.BenchmarkHyperparams(),
         )
+
+
+def test_pipeline_search_step_runs_before_benchmark_and_result_is_reused(
+    monkeypatch, tmp_path
+):
+    data_root = tmp_path / "data"
+    fake_download, _download_calls = _fake_download_main_factory(data_root)
+    monkeypatch.setattr(pipeline, "download_main", fake_download)
+
+    winning_hp = pipeline.BenchmarkHyperparams(lr=9.99e-5)
+    search_calls = []
+
+    def fake_search_hyperparams(equation, _file_path, _search_space, **_kwargs):
+        search_calls.append(equation)
+        return winning_hp, []
+
+    monkeypatch.setattr(pipeline, "_search_hyperparams", fake_search_hyperparams)
+
+    used_hyperparams = []
+
+    def fake_darcy_benchmark(_file_path, **kwargs):
+        used_hyperparams.append(kwargs["hyperparams"])
+        return [
+            pipeline.BenchmarkResult(
+                name="FNO2d-toy",
+                n_parameters=1,
+                train_time_s=0.01,
+                inference_latency_ms=0.1,
+                test_l2_error=0.5,
+            )
+        ]
+
+    monkeypatch.setattr(pipeline, "run_darcy_benchmark", fake_darcy_benchmark)
+
+    run_dir = tmp_path / "run"
+    config = pipeline.PipelineConfig(
+        run_dir=run_dir,
+        data_root=data_root,
+        equations=("darcy",),
+        epochs=1,
+        search=True,
+    )
+    pipeline.run_pipeline(config)
+
+    assert search_calls == ["darcy"]
+    assert used_hyperparams == [winning_hp]
+    assert (run_dir / "search" / "darcy.json").exists()
+
+    # Force-redo the benchmark step without re-enabling search: the saved
+    # search result must still be the one used, not config.hyperparams.
+    config.search = False
+    config.force = True
+    pipeline.run_pipeline(config)
+
+    assert search_calls == ["darcy"]  # search itself was NOT redone
+    assert used_hyperparams == [winning_hp, winning_hp]
 
 
 def test_cli_main_wires_args_into_pipeline_config(monkeypatch, tmp_path):
@@ -210,6 +269,40 @@ def test_cli_main_wires_args_into_pipeline_config(monkeypatch, tmp_path):
     assert config.equations == ("darcy",)
     assert config.epochs == 3
     assert config.force is True
+
+
+def test_cli_main_wires_search_flags_into_pipeline_config(monkeypatch, tmp_path):
+    captured_config = {}
+
+    def fake_run_pipeline(config: pipeline.PipelineConfig):
+        captured_config["config"] = config
+        return {"darcy": []}
+
+    monkeypatch.setattr(pipeline, "run_pipeline", fake_run_pipeline)
+
+    pipeline.main(
+        [
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--equation",
+            "darcy",
+            "--search",
+            "--search-n-train",
+            "128",
+            "--search-lr",
+            "1e-3",
+            "--search-lr",
+            "1e-4",
+            "--search-fno-width",
+            "8",
+        ]
+    )
+
+    config = captured_config["config"]
+    assert config.search is True
+    assert config.search_n_train == 128
+    assert config.search_space.lr == [1e-3, 1e-4]
+    assert config.search_space.fno_width == [8]
 
 
 @pytest.mark.skipif(not DARCY_FILE.exists(), reason="Darcy sample not downloaded")

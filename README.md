@@ -17,6 +17,7 @@
 - [Data](#data)
 - [Models](#models)
 - [Benchmark](#benchmark)
+- [Hyperparameter Search](#hyperparameter-search)
 - [Pipeline](#pipeline)
 - [Development](#development)
 - [License](#license)
@@ -201,29 +202,50 @@ uv run fno-pipeline --run-dir runs/real --equation darcy --equation burgers \
 
 Navier-Stokes needs more *data*, not just more epochs, to get meaningful numbers: only 4 trajectories/shard means even `--variant shard0-shard9` (10 shards) only gives 40 trajectories total.
 
+## Hyperparameter Search
+
+`fno-search` grid-searches FNO/DeepONet hyperparameters (`lr`, `fno_width`, `deeponet_hidden_dim`, ...) on a **small data subset** with **few epochs** (fast), then reports the winner -- so you don't have to guess before spending real compute on a full-data run:
+
+```bash
+uv run fno-search darcy --file data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5 \
+  --n-train 256 --n-test 64 --epochs 5 \
+  --lr 1e-3 --lr 5e-4 --fno-width 16 --fno-width 32 \
+  --results-file runs/search/darcy.json
+```
+
+It's a small, dependency-free grid search (Cartesian product over whichever knobs you pass candidates for), not a general HPO framework -- ranking is by combined FNO + DeepONet test $L^2$ error on the subset. PINN is always skipped during search (it fits one instance, not an operator, so it doesn't share these hyperparameters meaningfully, and it's cheap enough to just run once at full scale).
+
+**The "search on a subset, then train on the full data" workflow is automated end to end via `fno-pipeline --search`** -- see [Pipeline](#pipeline) below: it runs the search first, saves the winner, and feeds it straight into the full-data benchmark step.
+
 ## Pipeline
 
-`fno-pipeline` runs the full **download -> train -> evaluate -> benchmark -> plot** flow for all three equations end to end, and is safe to interrupt (Ctrl-C, crash, killed process) and resume:
+`fno-pipeline` runs the full **download -> [search] -> train -> evaluate -> benchmark -> plot** flow for all three equations end to end, and is safe to interrupt (Ctrl-C, crash, killed process) and resume:
 
 ```bash
 uv run fno-pipeline --run-dir runs/demo --epochs 20 --pinn-epochs 500
+
+# or: search a small subset first, then train on the full --n-train/--n-test with the winner
+uv run fno-pipeline --run-dir runs/demo --search --search-lr 1e-3 --search-lr 5e-4 \
+  --n-train 7000 --n-test 1000 --epochs 500
 ```
 
 ```mermaid
 flowchart LR
     subgraph EQ["per equation: darcy / burgers / navier_stokes"]
         direction LR
-        A[download] --> B["benchmark<br/>(FNO + DeepONet + PINN)"]
+        A[download] --> S["search (optional,\n--search)"]
+        S --> B["benchmark<br/>(FNO + DeepONet + PINN)"]
         B --> C[plot]
     end
     C --> D["report.md +<br/>cross-equation plot"]
 ```
 
-This downloads (if missing) each equation's default dataset variant, benchmarks FNO/DeepONet/PINN on it, saves results as JSON, and renders a PNG comparison plot -- writing everything under `--run-dir`:
+This downloads (if missing) each equation's default dataset variant, optionally searches hyperparameters on a subset, benchmarks FNO/DeepONet/PINN on the full data (using the search winner if search ran), saves results as JSON, and renders a PNG comparison plot -- writing everything under `--run-dir`:
 
 ```
 runs/demo/
   pipeline_state.json          # which steps have completed
+  search/<equation>.json        # winning hyperparams + full trial log (if --search)
   checkpoints/<equation>/*.pt   # FNO/DeepONet training checkpoints (trainer.fit())
   results/<equation>.json       # BenchmarkResult list, per equation
   plots/<equation>_summary.png  # params/train-time/latency/error bar chart
@@ -231,11 +253,12 @@ runs/demo/
   report.md                     # combined human-readable summary
 ```
 
-**Resumability works at two levels:**
-1. **Pipeline step level** -- `pipeline_state.json` tracks completion of each `download_<eq>` / `benchmark_<eq>` / `plot_<eq>` step plus a final `report` step. Re-running with the same `--run-dir` skips everything already done and only (re)runs what's left.
+**Resumability works at three levels:**
+1. **Pipeline step level** -- `pipeline_state.json` tracks completion of each `download_<eq>` / `search_<eq>` (if enabled) / `benchmark_<eq>` / `plot_<eq>` step plus a final `report` step. Re-running with the same `--run-dir` skips everything already done and only (re)runs what's left. A saved `search/<equation>.json` is reused for the benchmark step even on a later run where `--search` isn't passed again -- it's never silently discarded.
 2. **Training epoch level** -- each `benchmark_<eq>` step passes its own `checkpoint_dir`, so even if that step itself gets interrupted mid-training, retrying it resumes FNO/DeepONet from their last saved epoch (via `trainer.fit()`) instead of restarting. PINN isn't checkpointed (it retrains from scratch on retry, which is cheap -- seconds, not minutes, since it fits a single instance).
+3. **Search trial level** -- search trials themselves aren't individually checkpointed (they're small/fast by design), so an interrupted `search_<eq>` step restarts the grid from scratch on retry -- but once it completes, its result is durable (level 1).
 
-Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `--force` (ignore saved state and redo every step), `--device`.
+Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `--force` (ignore saved state and redo every step), `--device`, `--search` (+ `--search-lr`/`--search-fno-width`/`--search-deeponet-hidden-dim`, each repeatable, + `--search-n-train`/`--search-n-test`/`--search-epochs`).
 
 ## Development
 

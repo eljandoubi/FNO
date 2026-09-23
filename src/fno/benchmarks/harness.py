@@ -295,6 +295,7 @@ def run_darcy_benchmark(
     device: str | None = None,
     checkpoint_dir: str | Path | None = None,
     hyperparams: BenchmarkHyperparams | None = None,
+    skip_pinn: bool = False,
 ) -> list[BenchmarkResult]:
     device = device or trainer.auto_device()
     hp = hyperparams or BenchmarkHyperparams()
@@ -378,22 +379,23 @@ def run_darcy_benchmark(
     pinn_field, pinn_target, pinn_grid = full_test[
         0
     ]  # same held-out instance as the superres check
-    results.append(
-        benchmark_pinn_darcy(
-            "PINN (single-instance fit)",
-            pinn_field.squeeze(0),
-            pinn_target.squeeze(0),
-            domain=(
-                pinn_grid[..., 0].min().item(),
-                pinn_grid[..., 0].max().item(),
-                pinn_grid[..., 1].min().item(),
-                pinn_grid[..., 1].max().item(),
-            ),
-            epochs=pinn_epochs,
-            lr=hp.lr,
-            device=device,
+    if not skip_pinn:
+        results.append(
+            benchmark_pinn_darcy(
+                "PINN (single-instance fit)",
+                pinn_field.squeeze(0),
+                pinn_target.squeeze(0),
+                domain=(
+                    pinn_grid[..., 0].min().item(),
+                    pinn_grid[..., 0].max().item(),
+                    pinn_grid[..., 1].min().item(),
+                    pinn_grid[..., 1].max().item(),
+                ),
+                epochs=pinn_epochs,
+                lr=hp.lr,
+                device=device,
+            )
         )
-    )
 
     return results
 
@@ -526,6 +528,7 @@ def run_burgers_benchmark(
     device: str | None = None,
     checkpoint_dir: str | Path | None = None,
     hyperparams: BenchmarkHyperparams | None = None,
+    skip_pinn: bool = False,
 ) -> list[BenchmarkResult]:
     device = device or trainer.auto_device()
     hp = hyperparams or BenchmarkHyperparams()
@@ -606,20 +609,21 @@ def run_burgers_benchmark(
     )
 
     _pinn_window, pinn_trajectory, pinn_grid = full_test[0]
-    results.append(
-        benchmark_pinn_burgers(
-            "PINN (single-instance fit)",
-            x_ic=pinn_grid,
-            u_ic=pinn_trajectory[0].unsqueeze(-1),
-            nu=0.01,  # matches PDEBench's Nu0.01 filename convention
-            domain_x=(pinn_grid.min().item(), pinn_grid.max().item()),
-            domain_t=(full_test.t.min().item(), full_test.t.max().item()),
-            target_final=pinn_trajectory[-1],
-            epochs=pinn_epochs,
-            lr=hp.lr,
-            device=device,
+    if not skip_pinn:
+        results.append(
+            benchmark_pinn_burgers(
+                "PINN (single-instance fit)",
+                x_ic=pinn_grid,
+                u_ic=pinn_trajectory[0].unsqueeze(-1),
+                nu=0.01,  # matches PDEBench's Nu0.01 filename convention
+                domain_x=(pinn_grid.min().item(), pinn_grid.max().item()),
+                domain_t=(full_test.t.min().item(), full_test.t.max().item()),
+                target_final=pinn_trajectory[-1],
+                epochs=pinn_epochs,
+                lr=hp.lr,
+                device=device,
+            )
         )
-    )
 
     return results
 
@@ -710,6 +714,7 @@ def run_navier_stokes_benchmark(
     device: str | None = None,
     checkpoint_dir: str | Path | None = None,
     hyperparams: BenchmarkHyperparams | None = None,
+    skip_pinn: bool = False,
 ) -> list[BenchmarkResult]:
     """Only 4 trajectories per downloaded shard, so this uses a (0.5, 0.0, 0.5)
     train/test split by default rather than the usual (0.8, 0.1, 0.1) -- pass
@@ -816,30 +821,34 @@ def run_navier_stokes_benchmark(
     grid = high_res_test.grid  # (H, W, 2)
     force = high_res_test.force[0]  # (2, H, W) -- first test trajectory
     velocity0 = high_res_test.velocity[0]  # (T, 2, H, W)
-    results.append(
-        benchmark_pinn_navier_stokes(
-            "PINN (single-instance fit)",
-            force_x_field=force[0],
-            force_y_field=force[1],
-            domain=(
-                grid[..., 0].min().item(),
-                grid[..., 0].max().item(),
-                grid[..., 1].min().item(),
-                grid[..., 1].max().item(),
-            ),
-            nu=0.01,  # assumed placeholder -- not verified against PDEBench's actual generation params
-            x_ic=grid[..., 0].reshape(-1, 1),
-            y_ic=grid[..., 1].reshape(-1, 1),
-            u_ic=velocity0[0, 0].reshape(-1, 1),
-            v_ic=velocity0[0, 1].reshape(-1, 1),
-            domain_t=(high_res_test.t[0].min().item(), high_res_test.t[0].max().item()),
-            target_u_final=velocity0[-1, 0],
-            target_v_final=velocity0[-1, 1],
-            epochs=pinn_epochs,
-            lr=hp.lr,
-            device=device,
+    if not skip_pinn:
+        results.append(
+            benchmark_pinn_navier_stokes(
+                "PINN (single-instance fit)",
+                force_x_field=force[0],
+                force_y_field=force[1],
+                domain=(
+                    grid[..., 0].min().item(),
+                    grid[..., 0].max().item(),
+                    grid[..., 1].min().item(),
+                    grid[..., 1].max().item(),
+                ),
+                nu=0.01,  # assumed placeholder -- not verified against PDEBench's actual generation params
+                x_ic=grid[..., 0].reshape(-1, 1),
+                y_ic=grid[..., 1].reshape(-1, 1),
+                u_ic=velocity0[0, 0].reshape(-1, 1),
+                v_ic=velocity0[0, 1].reshape(-1, 1),
+                domain_t=(
+                    high_res_test.t[0].min().item(),
+                    high_res_test.t[0].max().item(),
+                ),
+                target_u_final=velocity0[-1, 0],
+                target_v_final=velocity0[-1, 1],
+                epochs=pinn_epochs,
+                lr=hp.lr,
+                device=device,
+            )
         )
-    )
 
     return results
 

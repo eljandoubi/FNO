@@ -36,6 +36,8 @@ from fno.benchmarks.harness import (
     save_results,
 )
 from fno.benchmarks.plots import plot_benchmark_summary, plot_cross_equation_errors
+from fno.benchmarks.search import SearchSpace, load_best_hyperparams, save_search_result
+from fno.benchmarks.search import search_hyperparams as _search_hyperparams
 from fno.data.download import main as download_main
 
 EQUATIONS: tuple[str, ...] = ("darcy", "burgers", "navier_stokes")
@@ -64,6 +66,11 @@ class PipelineConfig:
     device: str | None = None
     force: bool = False  # re-run every step, ignoring saved state
     hyperparams: BenchmarkHyperparams = field(default_factory=BenchmarkHyperparams)
+    search: bool = False  # run a hyperparameter search before the full-data benchmark
+    search_space: SearchSpace = field(default_factory=SearchSpace)
+    search_n_train: int = 256
+    search_n_test: int = 64
+    search_epochs: int = 5
 
 
 def _state_path(run_dir: Path) -> Path:
@@ -119,8 +126,15 @@ def _plot_path(run_dir: Path, equation: str) -> Path:
     return run_dir / "plots" / f"{equation}_summary.png"
 
 
+def _search_result_path(run_dir: Path, equation: str) -> Path:
+    return run_dir / "search" / f"{equation}.json"
+
+
 def _run_benchmark(
-    equation: str, config: PipelineConfig, file_path: Path
+    equation: str,
+    config: PipelineConfig,
+    file_path: Path,
+    hyperparams: BenchmarkHyperparams,
 ) -> list[BenchmarkResult]:
     checkpoint_dir = config.run_dir / "checkpoints" / equation
     if equation == "darcy":
@@ -132,7 +146,7 @@ def _run_benchmark(
             pinn_epochs=config.pinn_epochs,
             device=config.device,
             checkpoint_dir=checkpoint_dir,
-            hyperparams=config.hyperparams,
+            hyperparams=hyperparams,
         )
     if equation == "burgers":
         return run_burgers_benchmark(
@@ -143,7 +157,7 @@ def _run_benchmark(
             pinn_epochs=config.pinn_epochs,
             device=config.device,
             checkpoint_dir=checkpoint_dir,
-            hyperparams=config.hyperparams,
+            hyperparams=hyperparams,
         )
     if equation == "navier_stokes":
         return run_navier_stokes_benchmark(
@@ -152,7 +166,7 @@ def _run_benchmark(
             pinn_epochs=config.pinn_epochs,
             device=config.device,
             checkpoint_dir=checkpoint_dir,
-            hyperparams=config.hyperparams,
+            hyperparams=hyperparams,
         )
     raise ValueError(f"unknown equation: {equation!r}")
 
@@ -192,10 +206,37 @@ def _run_equation_pipeline(
             "was the data directory removed after a previous successful run?"
         )
 
+    search_result_path = _search_result_path(run_dir, equation)
+    if config.search:
+
+        def _search() -> None:
+            best_hp, trials = _search_hyperparams(
+                equation,
+                file_path,
+                config.search_space,
+                n_train=config.search_n_train,
+                n_test=config.search_n_test,
+                epochs=config.search_epochs,
+                device=config.device,
+            )
+            save_search_result(best_hp, trials, search_result_path)
+
+        _run_step(run_dir, state, f"search_{equation}", config.force, _search)
+
+    # A prior search's result is reused on resume even if --search isn't
+    # passed again, so it isn't silently discarded/redone.
+    hyperparams = (
+        load_best_hyperparams(search_result_path)
+        if search_result_path.exists()
+        else config.hyperparams
+    )
+
     results_path = _results_path(run_dir, equation)
 
     def _benchmark() -> None:
-        save_results(_run_benchmark(equation, config, file_path), results_path)
+        save_results(
+            _run_benchmark(equation, config, file_path, hyperparams), results_path
+        )
 
     _run_step(run_dir, state, f"benchmark_{equation}", config.force, _benchmark)
     results = load_results(results_path)
@@ -315,8 +356,39 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Override DeepONet's latent (dot-product) dimension (default 64).",
     )
+    parser.add_argument(
+        "--search",
+        action="store_true",
+        help=(
+            "Before the full-data benchmark, grid-search FNO/DeepONet "
+            "hyperparameters on a small data subset and use the winner "
+            "instead of --lr/--fno-*/--deeponet-* above."
+        ),
+    )
+    parser.add_argument("--search-n-train", type=int, default=256)
+    parser.add_argument("--search-n-test", type=int, default=64)
+    parser.add_argument("--search-epochs", type=int, default=5)
+    parser.add_argument(
+        "--search-lr",
+        type=float,
+        action="append",
+        help="Repeatable candidate lr values for --search (default: 1e-3, 5e-4).",
+    )
+    parser.add_argument(
+        "--search-fno-width",
+        type=int,
+        action="append",
+        help="Repeatable candidate values for --search (default: per-equation default, 16).",
+    )
+    parser.add_argument(
+        "--search-deeponet-hidden-dim",
+        type=int,
+        action="append",
+        help="Repeatable candidate values for --search (default: per-equation default, 64).",
+    )
     args = parser.parse_args(argv)
 
+    default_space = SearchSpace()
     config = PipelineConfig(
         run_dir=args.run_dir,
         equations=tuple(args.equations) if args.equations else EQUATIONS,
@@ -337,6 +409,16 @@ def main(argv: list[str] | None = None) -> None:
             deeponet_hidden_dim=args.deeponet_hidden_dim,
             deeponet_latent_dim=args.deeponet_latent_dim,
         ),
+        search=args.search,
+        search_space=SearchSpace(
+            lr=args.search_lr or default_space.lr,
+            fno_width=args.search_fno_width or default_space.fno_width,
+            deeponet_hidden_dim=args.search_deeponet_hidden_dim
+            or default_space.deeponet_hidden_dim,
+        ),
+        search_n_train=args.search_n_train,
+        search_n_test=args.search_n_test,
+        search_epochs=args.search_epochs,
     )
 
     results_by_equation = run_pipeline(config)
