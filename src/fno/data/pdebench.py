@@ -41,7 +41,9 @@ class DarcyFlowDataset(Dataset):
         self.file_path = Path(file_path)
         with h5py.File(self.file_path, "r") as f:
             _require_keys(
-                set(f.keys()), {"nu", "tensor", "x-coordinate", "y-coordinate"}, self.file_path
+                set(f.keys()),
+                {"nu", "tensor", "x-coordinate", "y-coordinate"},
+                self.file_path,
             )
             nu = np.asarray(f["nu"], dtype=np.float32)
             tensor = np.asarray(f["tensor"], dtype=np.float32)

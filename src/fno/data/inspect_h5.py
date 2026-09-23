@@ -49,7 +49,9 @@ def main(argv: list[str] | None = None) -> None:
 
         f.visititems(visitor)
         if count >= args.max_keys:
-            print(f"  ... truncated at {args.max_keys} entries, pass --max-keys to see more")
+            print(
+                f"  ... truncated at {args.max_keys} entries, pass --max-keys to see more"
+            )
 
 
 if __name__ == "__main__":
