@@ -311,16 +311,26 @@ def test_fit_deeponet_on_small_real_navier_stokes_subset():
     # spatial_stride=8 (512 -> 64) keeps this fast without loading full-res arrays.
     fractions = (0.5, 0.25, 0.25)
     train_ds = NavierStokes2DDataset(
-        NS_FILE, initial_step=5, split="train", split_fractions=fractions, spatial_stride=8
+        NS_FILE,
+        initial_step=5,
+        split="train",
+        split_fractions=fractions,
+        spatial_stride=8,
     )
     val_ds = NavierStokes2DDataset(
-        NS_FILE, initial_step=5, split="val", split_fractions=fractions, spatial_stride=8
+        NS_FILE,
+        initial_step=5,
+        split="val",
+        split_fractions=fractions,
+        spatial_stride=8,
     )
 
     train_loader = DataLoader(
         train_ds, batch_size=1, collate_fn=navier_stokes_deeponet_collate
     )
-    val_loader = DataLoader(val_ds, batch_size=1, collate_fn=navier_stokes_deeponet_collate)
+    val_loader = DataLoader(
+        val_ds, batch_size=1, collate_fn=navier_stokes_deeponet_collate
+    )
 
     model = DeepONet(
         branch_input_dim=5 * 2 * 64 * 64,
