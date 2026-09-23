@@ -72,7 +72,13 @@ def plot_cross_equation_errors(
             )
             values.append(match.test_l2_error if match else float("nan"))
         offsets = [x + i * width for x in range(len(equations))]
-        ax.bar(offsets, values, width=width, label=model_name, color=_COLORS[i % len(_COLORS)])
+        ax.bar(
+            offsets,
+            values,
+            width=width,
+            label=model_name,
+            color=_COLORS[i % len(_COLORS)],
+        )
 
     ax.set_xticks([x + width * (n_models - 1) / 2 for x in range(len(equations))])
     ax.set_xticklabels(equations)
