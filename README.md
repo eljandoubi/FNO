@@ -29,7 +29,7 @@ Benchmark datasets are fetched on demand via the `fno-download` CLI -- nothing d
 uv run fno-download --list                                   # available datasets and variants
 uv run fno-download pdebench-darcy2d                          # 2D Darcy Flow sample (~1.2 GB)
 uv run fno-download pdebench-burgers1d --variant nu0.01       # 1D Burgers sample
-uv run fno-download pdebench-navierstokes2d --variant shard0  # 2D Navier-Stokes shard (~8 GB)
+uv run fno-download pdebench-navierstokes2d --variant shard0  # 2D Navier-Stokes shard (~9.9 GB)
 uv run fno-download airfrans                                  # 2D airfoil RANS CFD (~10 GB)
 ```
 
@@ -41,6 +41,27 @@ uv run fno-download airfrans                                  # 2D airfoil RANS 
 | `airfrans` | [AirfRANS](https://github.com/Extrality/AirfRANS) | irregular-geometry airfoil CFD, single archive |
 
 Files are checksum-verified (MD5) against PDEBench's published hashes where available. Use `--variant` (repeatable) or `--all-variants` to pick which files to pull, and `--force` to re-download.
+
+Before writing a loader for a new/unverified file format, inspect its real structure:
+
+```bash
+uv run fno-inspect-h5 data/raw/pdebench-navierstokes2d/ns_incom_inhom_2d_512-0.h5
+```
+
+### Loading data
+
+`src/fno/data/pdebench.py` provides PyTorch `Dataset` classes for the three target equations, each validated against real downloaded files (schema confirmed via `fno-inspect-h5`, not just assumed from docs):
+
+- `DarcyFlowDataset` -- permeability field (`nu`) -> steady-state pressure field (`tensor`)
+- `Burgers1DDataset` -- initial timesteps -> full spatio-temporal trajectory
+- `NavierStokes2DDataset` -- initial velocity frames -> full trajectory; accepts multiple shard paths (each shard only holds 4 trajectories) and concatenates them
+
+```python
+from fno.data.pdebench import DarcyFlowDataset
+
+ds = DarcyFlowDataset("data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5", train=True)
+input_field, target_field, grid = ds[0]
+```
 
 ## Development
 
