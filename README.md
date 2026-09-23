@@ -71,17 +71,37 @@ Three operator-learning/PDE-solving architectures are implemented, mirroring the
 
 - **`fno.models.fno`** (`FNO1d`/`FNO2d`) -- spectral convolutions truncated to a fixed number of Fourier modes, independent of spatial resolution (zero-shot super-resolution). Trained via `fno.training.trainer.fit()` with the `*_collate` adapters in `fno.training.collate`.
 - **`fno.models.deeponet`** (`DeepONet`) -- branch net encodes the input function at fixed sensors, trunk net encodes query coordinates, output is their dot product. The trunk can be queried at arbitrary/new points without retraining, but the branch's input size (sensor sampling) is fixed at construction. Trained the same way via `fit()`, using the `*_deeponet_collate` adapters.
-- **`fno.models.pinn`** (`PINN`) + **`fno.training.pinn`** -- a coordinate-to-solution MLP trained by minimizing the PDE residual (via autograd) plus an initial-condition data term. Unlike FNO/DeepONet, a PINN is **not an operator**: it solves one fixed PDE instance (one viscosity, one initial condition) and must be retrained for every new instance. Currently covers 1D Burgers' equation only -- Darcy's residual needs a differentiable interpolation of its discretized coefficient field, not yet implemented.
+- **`fno.models.pinn`** (`PINN`) + **`fno.training.pinn`** -- a coordinate-to-solution MLP trained by minimizing the PDE residual (via autograd) plus initial/boundary data terms. Unlike FNO/DeepONet, a PINN is **not an operator**: it solves one fixed PDE instance (one viscosity, one coefficient field) and must be retrained for every new instance.
+
+### Coverage
+
+Every cell below is backed by a test that runs against real downloaded data (not just synthetic fixtures), except where noted.
+
+| | Darcy Flow (2D) | Burgers' (1D) | Navier-Stokes (2D) |
+| --- | --- | --- | --- |
+| **FNO** | done | done | done |
+| **DeepONet** | done | done | done |
+| **PINN** | done | done | **not implemented** |
+
+**Why PINN + Navier-Stokes is missing:** its residual needs the full incompressible Navier-Stokes momentum + continuity equations, which requires a pressure field the dataset doesn't include (`NS_Incom` only has `velocity`/`particles`/`force`). The standard fix -- have the network jointly predict pressure or a stream function alongside velocity -- is a meaningfully larger addition than Darcy's fix was, and isn't implemented here.
+
+**Darcy's PINN residual** (`-div(a*grad(u)) = f`) needed one extra piece beyond Burgers: `a(x,y)` is a discretized per-sample field, not closed-form, so `fno.training.pinn._interpolate_field` bilinearly interpolates it via `torch.nn.functional.grid_sample` -- kept differentiable end-to-end so `a`'s own spatial derivatives can be autograd'd too. Verified against a manufactured solution (`a=1`, `u=x^2+y^2`, exact residual `=0`), not just "it runs."
 
 ```python
 from fno.models.pinn import PINN
-from fno.training.pinn import train_pinn_burgers
+from fno.training.pinn import train_pinn_burgers, train_pinn_darcy
 
 model = PINN(in_dim=2, out_dim=1)
 history = train_pinn_burgers(
     model, x_ic, u_ic, nu=0.01, domain_x=(0.0, 1.0), domain_t=(0.0, 2.0),
 )
+
+model = PINN(in_dim=2, out_dim=1)
+history = train_pinn_darcy(
+    model, coefficient_field, domain=(0.0, 1.0, 0.0, 1.0), forcing=1.0,
+)
 ```
+
 
 ## Development
 
