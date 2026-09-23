@@ -1,10 +1,8 @@
 """PyTorch datasets for PDEBench HDF5 files (Burgers 1D, Darcy Flow 2D, NS_Incom 2D).
 
 Schema reference: pdebench/models/fno/utils.py in github.com/pdebench/PDEBench.
-Burgers/Darcy are built from that documented schema but not yet validated against
-a real downloaded file. NavierStokes2DDataset's schema *is* confirmed against a
-real downloaded shard via `fno-inspect-h5` (keys: velocity, particles, force, t --
-no grouped-by-sample layout, no x/y-coordinate keys).
+All three dataset classes below are confirmed against real downloaded files via
+`fno-inspect-h5` + an end-to-end load (not just synthetic test fixtures).
 """
 
 from __future__ import annotations
