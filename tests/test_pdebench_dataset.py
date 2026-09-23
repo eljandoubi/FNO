@@ -23,7 +23,9 @@ def _write_burgers_h5(path, n=10, t=5, x=16):
     with h5py.File(path, "w") as f:
         f["tensor"] = np.random.rand(n, t, x).astype(np.float32)
         f["x-coordinate"] = np.linspace(0, 1, x, dtype=np.float32)
-        f["t-coordinate"] = np.linspace(0, 1, t + 1, dtype=np.float32)  # PDEBench: T+1 points
+        f["t-coordinate"] = np.linspace(
+            0, 1, t + 1, dtype=np.float32
+        )  # PDEBench: T+1 points
 
 
 def test_darcy_dataset_shapes(tmp_path):

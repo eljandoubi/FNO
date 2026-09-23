@@ -117,7 +117,9 @@ class Burgers1DDataset(Dataset):
         self.initial_step = initial_step
         with h5py.File(self.file_path, "r") as f:
             _require_keys(
-                set(f.keys()), {"tensor", "x-coordinate", "t-coordinate"}, self.file_path
+                set(f.keys()),
+                {"tensor", "x-coordinate", "t-coordinate"},
+                self.file_path,
             )
             tensor = np.asarray(f["tensor"], dtype=np.float32)  # (N, T, X)
             x = np.asarray(f["x-coordinate"], dtype=np.float32)
