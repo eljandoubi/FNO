@@ -104,7 +104,9 @@ def train_pinn_burgers(
     return history
 
 
-def _interpolate_field(field_hw: Tensor, x: Tensor, y: Tensor, domain: tuple[float, float, float, float]) -> Tensor:
+def _interpolate_field(
+    field_hw: Tensor, x: Tensor, y: Tensor, domain: tuple[float, float, float, float]
+) -> Tensor:
     """Differentiably bilinear-interpolate a (H, W) field, where field[i, j]
     sits at (x=domain_x_grid[i], y=domain_y_grid[j]), at continuous query
     points (x, y) -- each (N, 1). `domain` is (x_min, x_max, y_min, y_max).
@@ -116,7 +118,9 @@ def _interpolate_field(field_hw: Tensor, x: Tensor, y: Tensor, domain: tuple[flo
     # grid[..., 1] indexes the input's SECOND-TO-LAST dim (our H/x axis).
     grid = torch.stack([y_norm, x_norm], dim=-1).view(1, -1, 1, 2)
     field = field_hw.view(1, 1, *field_hw.shape)
-    sampled = F.grid_sample(field, grid, mode="bilinear", align_corners=True, padding_mode="border")
+    sampled = F.grid_sample(
+        field, grid, mode="bilinear", align_corners=True, padding_mode="border"
+    )
     return sampled.view(-1, 1)
 
 
@@ -159,10 +163,22 @@ def _sample_boundary(
 
     rand = torch.rand(n_per_edge, device=device)
     edges = [
-        _edge(torch.full((n_per_edge,), x_min, device=device), rand * (y_max - y_min) + y_min),
-        _edge(torch.full((n_per_edge,), x_max, device=device), rand * (y_max - y_min) + y_min),
-        _edge(rand * (x_max - x_min) + x_min, torch.full((n_per_edge,), y_min, device=device)),
-        _edge(rand * (x_max - x_min) + x_min, torch.full((n_per_edge,), y_max, device=device)),
+        _edge(
+            torch.full((n_per_edge,), x_min, device=device),
+            rand * (y_max - y_min) + y_min,
+        ),
+        _edge(
+            torch.full((n_per_edge,), x_max, device=device),
+            rand * (y_max - y_min) + y_min,
+        ),
+        _edge(
+            rand * (x_max - x_min) + x_min,
+            torch.full((n_per_edge,), y_min, device=device),
+        ),
+        _edge(
+            rand * (x_max - x_min) + x_min,
+            torch.full((n_per_edge,), y_max, device=device),
+        ),
     ]
     points = torch.cat(edges, dim=0)
     return points[:, 0:1], points[:, 1:2]
@@ -181,7 +197,9 @@ def darcy_pinn_loss(
     """Returns (total_loss, residual_loss, bc_loss). BC is homogeneous
     Dirichlet (u=0), matching the standard Darcy Flow benchmark convention.
     """
-    residual = darcy_residual(model, x_collocation, y_collocation, coefficient_field, domain, forcing)
+    residual = darcy_residual(
+        model, x_collocation, y_collocation, coefficient_field, domain, forcing
+    )
     residual_loss = (residual**2).mean()
 
     u_bc = model(torch.cat([x_bc, y_bc], dim=-1))
