@@ -1,12 +1,12 @@
 """PDE residual loss and training loop for PINNs (autograd-based).
 
-Covers the viscous 1D Burgers' equation (u_t + u*u_x - nu*u_xx = 0) and 2D
-Darcy Flow (-div(a*grad(u)) = f, a(x,y)=0 on the domain boundary), the two
-closed-form-residual PDEs among this repo's three target equations. NS_Incom
-is deliberately not covered: its residual needs the full incompressible
-Navier-Stokes momentum + continuity equations, which requires a pressure
-field we don't have in the data (the standard fix is to have the network
-jointly predict pressure/stream-function, not implemented here).
+Covers the viscous 1D Burgers' equation (u_t + u*u_x - nu*u_xx = 0), 2D Darcy
+Flow (-div(a*grad(u)) = f), and 2D incompressible Navier-Stokes with external
+forcing (u_t + u.grad(u) = -grad(p) + nu*lap(u) + f, div(u) = 0), all three
+of this repo's target equations. Navier-Stokes uses the classic stream-function
+formulation (u=psi_y, v=-psi_x) so incompressibility is satisfied automatically
+by construction, and the network jointly predicts (psi, p) -- no ground-truth
+pressure data is needed for training.
 
 Note the fundamentally different training paradigm vs. fno.training.trainer:
 a PINN fits ONE PDE instance (fixed parameters, fixed initial/boundary data)
@@ -22,9 +22,26 @@ from torch import Tensor, nn
 
 
 def _grad(output: Tensor, inputs: Tensor) -> Tensor:
-    return torch.autograd.grad(
-        output, inputs, grad_outputs=torch.ones_like(output), create_graph=True
+    """d(output)/d(inputs). Handles two distinct "no dependence" cases that
+    plain torch.autograd.grad would otherwise raise on instead of returning
+    zero: (1) `output` doesn't require grad at all -- e.g. it's a constant,
+    or itself already a zero-fallback from a previous `_grad` call, so a
+    further derivative is trivially zero; (2) `output` requires grad but
+    `inputs` isn't reachable from it (allow_unused=True), e.g. a steady-state
+    solution has no t-dependence at all.
+    """
+    if not output.requires_grad:
+        return torch.zeros_like(inputs)
+    grad = torch.autograd.grad(
+        output,
+        inputs,
+        grad_outputs=torch.ones_like(output),
+        create_graph=True,
+        allow_unused=True,
     )[0]
+    if grad is None:
+        return torch.zeros_like(inputs)
+    return grad
 
 
 def burgers_residual(model: nn.Module, x: Tensor, t: Tensor, nu: float) -> Tensor:
@@ -243,6 +260,167 @@ def train_pinn_darcy(
         optimizer.zero_grad()
         loss, _residual_loss, _bc_loss = darcy_pinn_loss(
             model, x_c, y_c, coefficient_field, domain, x_bc, y_bc, forcing
+        )
+        loss.backward()
+        optimizer.step()
+        history.append(loss.item())
+
+    return history
+
+
+def _stream_function_velocity(
+    model: nn.Module, x: Tensor, y: Tensor, t: Tensor
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Returns (u, v, p) via the stream-function formulation u=psi_y, v=-psi_x,
+    which satisfies incompressibility (u_x + v_y = 0) automatically for any
+    smooth psi. `model` outputs (psi, p) jointly given (x, y, t); `x`/`y` must
+    be leaf tensors with `requires_grad=True`.
+    """
+    coords = torch.cat([x, y, t], dim=-1)
+    out = model(coords)
+    psi, p = out[:, 0:1], out[:, 1:2]
+    psi_x = _grad(psi, x)
+    psi_y = _grad(psi, y)
+    return psi_y, -psi_x, p
+
+
+def navier_stokes_residual(
+    model: nn.Module,
+    x: Tensor,
+    y: Tensor,
+    t: Tensor,
+    nu: float,
+    force_x_field: Tensor,
+    force_y_field: Tensor,
+    domain: tuple[float, float, float, float],
+) -> tuple[Tensor, Tensor]:
+    """Momentum-equation residuals (residual_x, residual_y) for 2D
+    incompressible Navier-Stokes with external forcing. Continuity is
+    satisfied by construction (see `_stream_function_velocity`) so it isn't
+    a separate residual term. `force_x_field`/`force_y_field` are discretized
+    (H, W) forcing fields for ONE sample, bilinearly interpolated at (x, y).
+    """
+    u, v, p = _stream_function_velocity(model, x, y, t)
+
+    u_x = _grad(u, x)
+    u_y = _grad(u, y)
+    u_t = _grad(u, t)
+    u_xx = _grad(u_x, x)
+    u_yy = _grad(u_y, y)
+
+    v_x = _grad(v, x)
+    v_y = _grad(v, y)
+    v_t = _grad(v, t)
+    v_xx = _grad(v_x, x)
+    v_yy = _grad(v_y, y)
+
+    p_x = _grad(p, x)
+    p_y = _grad(p, y)
+
+    f_x = _interpolate_field(force_x_field, x, y, domain)
+    f_y = _interpolate_field(force_y_field, x, y, domain)
+
+    residual_x = u_t + u * u_x + v * u_y + p_x - nu * (u_xx + u_yy) - f_x
+    residual_y = v_t + u * v_x + v * v_y + p_y - nu * (v_xx + v_yy) - f_y
+    return residual_x, residual_y
+
+
+def navier_stokes_pinn_loss(
+    model: nn.Module,
+    x_collocation: Tensor,
+    y_collocation: Tensor,
+    t_collocation: Tensor,
+    nu: float,
+    force_x_field: Tensor,
+    force_y_field: Tensor,
+    domain: tuple[float, float, float, float],
+    x_ic: Tensor,
+    y_ic: Tensor,
+    u_ic: Tensor,
+    v_ic: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Returns (total_loss, residual_loss, ic_loss). `x_ic`/`y_ic` must have
+    `requires_grad=True` (velocity at the initial condition is itself a
+    derivative of the network's stream-function output).
+    """
+    res_x, res_y = navier_stokes_residual(
+        model,
+        x_collocation,
+        y_collocation,
+        t_collocation,
+        nu,
+        force_x_field,
+        force_y_field,
+        domain,
+    )
+    residual_loss = (res_x**2).mean() + (res_y**2).mean()
+
+    t_ic = torch.zeros_like(x_ic)
+    u_pred_ic, v_pred_ic, _p_ic = _stream_function_velocity(model, x_ic, y_ic, t_ic)
+    ic_loss = F.mse_loss(u_pred_ic, u_ic) + F.mse_loss(v_pred_ic, v_ic)
+
+    return residual_loss + ic_loss, residual_loss, ic_loss
+
+
+def train_pinn_navier_stokes(
+    model: nn.Module,
+    force_x_field: Tensor,
+    force_y_field: Tensor,
+    domain: tuple[float, float, float, float],
+    nu: float,
+    x_ic: Tensor,
+    y_ic: Tensor,
+    u_ic: Tensor,
+    v_ic: Tensor,
+    domain_t: tuple[float, float],
+    n_collocation: int = 2000,
+    epochs: int = 1000,
+    lr: float = 1e-3,
+    device: str = "cpu",
+) -> list[float]:
+    """Train a PINN to solve one instance of 2D incompressible Navier-Stokes
+    (one forcing field, one initial condition). Collocation points are
+    resampled every epoch. Returns the per-epoch total loss history.
+    """
+    device_ = torch.device(device)
+    model.to(device_)
+    force_x_field = force_x_field.to(device_)
+    force_y_field = force_y_field.to(device_)
+    x_ic = x_ic.to(device_).requires_grad_(True)
+    y_ic = y_ic.to(device_).requires_grad_(True)
+    u_ic = u_ic.to(device_)
+    v_ic = v_ic.to(device_)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    x_min, x_max, y_min, y_max = domain
+    t_min, t_max = domain_t
+
+    history: list[float] = []
+    for _ in range(epochs):
+        x_c = (
+            torch.rand(n_collocation, 1, device=device_) * (x_max - x_min) + x_min
+        ).requires_grad_(True)
+        y_c = (
+            torch.rand(n_collocation, 1, device=device_) * (y_max - y_min) + y_min
+        ).requires_grad_(True)
+        t_c = (
+            torch.rand(n_collocation, 1, device=device_) * (t_max - t_min) + t_min
+        ).requires_grad_(True)
+
+        optimizer.zero_grad()
+        loss, _residual_loss, _ic_loss = navier_stokes_pinn_loss(
+            model,
+            x_c,
+            y_c,
+            t_c,
+            nu,
+            force_x_field,
+            force_y_field,
+            domain,
+            x_ic,
+            y_ic,
+            u_ic,
+            v_ic,
         )
         loss.backward()
         optimizer.step()

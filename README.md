@@ -75,21 +75,22 @@ Three operator-learning/PDE-solving architectures are implemented, mirroring the
 
 ### Coverage
 
-Every cell below is backed by a test that runs against real downloaded data (not just synthetic fixtures), except where noted.
+Every cell below is backed by a test that runs against real downloaded data (not just synthetic fixtures).
 
 | | Darcy Flow (2D) | Burgers' (1D) | Navier-Stokes (2D) |
 | --- | --- | --- | --- |
 | **FNO** | done | done | done |
 | **DeepONet** | done | done | done |
-| **PINN** | done | done | **not implemented** |
+| **PINN** | done | done | done |
 
-**Why PINN + Navier-Stokes is missing:** its residual needs the full incompressible Navier-Stokes momentum + continuity equations, which requires a pressure field the dataset doesn't include (`NS_Incom` only has `velocity`/`particles`/`force`). The standard fix -- have the network jointly predict pressure or a stream function alongside velocity -- is a meaningfully larger addition than Darcy's fix was, and isn't implemented here.
-
-**Darcy's PINN residual** (`-div(a*grad(u)) = f`) needed one extra piece beyond Burgers: `a(x,y)` is a discretized per-sample field, not closed-form, so `fno.training.pinn._interpolate_field` bilinearly interpolates it via `torch.nn.functional.grid_sample` -- kept differentiable end-to-end so `a`'s own spatial derivatives can be autograd'd too. Verified against a manufactured solution (`a=1`, `u=x^2+y^2`, exact residual `=0`), not just "it runs."
+**PINN residuals get progressively more involved across the three equations:**
+- **Burgers'** (`u_t + u*u_x - nu*u_xx = 0`): the standard closed-form case.
+- **Darcy Flow** (`-div(a*grad(u)) = f`): `a(x,y)` is a discretized per-sample field, not closed-form, so `fno.training.pinn._interpolate_field` bilinearly interpolates it via `torch.nn.functional.grid_sample` -- kept differentiable end-to-end so `a`'s own spatial derivatives can be autograd'd too. Verified against a manufactured solution (`a=1`, `u=x^2+y^2`, exact residual `=0`).
+- **Navier-Stokes** (momentum + continuity, with external forcing): uses the classic stream-function formulation `u=psi_y`, `v=-psi_x`, which satisfies incompressibility automatically by construction (no ground-truth pressure data needed -- the network jointly predicts `(psi, p)`). Verified two ways: continuity holds for an arbitrary untrained network, and momentum residuals are zero for a manufactured `(psi, p)` solution with matching forcing.
 
 ```python
 from fno.models.pinn import PINN
-from fno.training.pinn import train_pinn_burgers, train_pinn_darcy
+from fno.training.pinn import train_pinn_burgers, train_pinn_darcy, train_pinn_navier_stokes
 
 model = PINN(in_dim=2, out_dim=1)
 history = train_pinn_burgers(
@@ -99,6 +100,12 @@ history = train_pinn_burgers(
 model = PINN(in_dim=2, out_dim=1)
 history = train_pinn_darcy(
     model, coefficient_field, domain=(0.0, 1.0, 0.0, 1.0), forcing=1.0,
+)
+
+model = PINN(in_dim=3, out_dim=2)  # (x, y, t) -> (psi, p)
+history = train_pinn_navier_stokes(
+    model, force_x_field, force_y_field, domain=(0.0, 1.0, 0.0, 1.0), nu=0.01,
+    x_ic=x_ic, y_ic=y_ic, u_ic=u_ic, v_ic=v_ic, domain_t=(0.0, 1.0),
 )
 ```
 
