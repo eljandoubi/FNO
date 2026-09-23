@@ -1,18 +1,26 @@
-"""Hyperparameter search: grid search over a small data subset (fast), then
-hand the winning `BenchmarkHyperparams` to the caller for a full-data run.
+"""Hyperparameter search over a small data subset (fast), then hand the
+winning `BenchmarkHyperparams` to the caller for a full-data run.
 
-This is a small, dependency-free grid search -- not a general-purpose HPO
-library -- matching this project's "keep it simple, verify honestly"
-philosophy. PINN is always skipped during search: it fits one instance (not
-an operator), doesn't share FNO/DeepONet's architecture hyperparameters in a
+Two strategies, both dependency-free -- not a general-purpose HPO library --
+matching this project's "keep it simple, verify honestly" philosophy:
+  - "grid": exhaustive Cartesian product over `SearchSpace`.
+  - "random": samples up to `n_trials` unique combinations at random
+    (seeded); usually more efficient than grid search for the same budget
+    once more than a couple of knobs are being varied (Bergstra & Bengio,
+    2012), and its cost doesn't explode combinatorially as candidates grow.
+
+PINN is always skipped during search: it fits one instance (not an
+operator), doesn't share FNO/DeepONet's architecture hyperparameters in a
 meaningful way, and is cheap enough to just run once at full scale anyway.
 """
+
 
 from __future__ import annotations
 
 import argparse
 import itertools
 import json
+import random
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -72,6 +80,25 @@ def _expand_search_space(space: SearchSpace) -> list[BenchmarkHyperparams]:
     ]
 
 
+STRATEGIES: tuple[str, ...] = ("grid", "random")
+
+
+def _select_candidates(
+    space: SearchSpace, strategy: str, n_trials: int, seed: int
+) -> list[BenchmarkHyperparams]:
+    all_candidates = _expand_search_space(space)
+    if strategy == "grid":
+        return all_candidates
+    if strategy == "random":
+        # Sample without replacement -- once n_trials >= grid size this is
+        # just the full grid, so "random" never wastes a trial on a repeat.
+        rng = random.Random(seed)
+        return rng.sample(all_candidates, k=min(n_trials, len(all_candidates)))
+    raise ValueError(
+        f"unknown search strategy: {strategy!r} (expected one of {STRATEGIES})"
+    )
+
+
 def _run_trial(
     equation: str,
     file_path_or_paths: str | Path | Sequence[str | Path],
@@ -82,6 +109,9 @@ def _run_trial(
     device: str | None,
 ) -> list[BenchmarkResult]:
     if equation == "darcy":
+        assert isinstance(file_path_or_paths, (str, Path)), (
+            "darcy takes a single file path, not a sequence"
+        )
         return run_darcy_benchmark(
             file_path_or_paths,
             n_train=n_train,
@@ -92,6 +122,9 @@ def _run_trial(
             skip_pinn=True,
         )
     if equation == "burgers":
+        assert isinstance(file_path_or_paths, (str, Path)), (
+            "burgers takes a single file path, not a sequence"
+        )
         return run_burgers_benchmark(
             file_path_or_paths,
             n_train=n_train,
@@ -120,15 +153,26 @@ def search_hyperparams(
     n_test: int = 64,
     epochs: int = 5,
     device: str | None = None,
+    strategy: str = "grid",
+    n_trials: int = 10,
+    seed: int = 0,
 ) -> tuple[BenchmarkHyperparams, list[SearchTrial]]:
-    """Grid-search `search_space` on a SMALL data subset (`n_train`/`n_test`,
+    """Search `search_space` on a SMALL data subset (`n_train`/`n_test`,
     `epochs` all much smaller than a real run) to find good FNO/DeepONet
     hyperparameters fast, before spending real compute on the full dataset.
+
+    `strategy="grid"` (default) tries every combination in `search_space`.
+    `strategy="random"` instead samples up to `n_trials` unique combinations
+    at random (seeded, for reproducibility) -- usually more efficient than
+    grid search for the same budget once the space has more than a couple
+    of knobs being varied at once (Bergstra & Bengio, 2012), and its cost
+    doesn't explode combinatorially as you add candidate values.
+
     Returns the winning `BenchmarkHyperparams` (lowest combined FNO+DeepONet
     test L2 error) plus the full trial log.
     """
     space = search_space or SearchSpace()
-    candidates = _expand_search_space(space)
+    candidates = _select_candidates(space, strategy, n_trials, seed)
 
     trials: list[SearchTrial] = []
     best_hp = candidates[0]
@@ -177,9 +221,10 @@ def load_best_hyperparams(path: str | Path) -> BenchmarkHyperparams:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Grid-search FNO/DeepONet hyperparameters on a small data subset "
-            "(fast), then print/save the winner for a full-data training run "
-            "(see fno-pipeline --search for the automated two-phase version)."
+            "Grid- or random-search FNO/DeepONet hyperparameters on a small "
+            "data subset (fast), then print/save the winner for a full-data "
+            "training run (see fno-pipeline --search for the automated "
+            "two-phase version)."
         )
     )
     parser.add_argument("equation", choices=list(EQUATIONS))
@@ -250,6 +295,25 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Save the winning hyperparams + full trial log as JSON here.",
     )
+    parser.add_argument(
+        "--strategy",
+        choices=list(STRATEGIES),
+        default="grid",
+        help=(
+            "'grid': try every combination. 'random': sample up to "
+            "--n-trials unique combinations (usually more efficient once "
+            "more than a couple of knobs have multiple candidates). Default: grid."
+        ),
+    )
+    parser.add_argument(
+        "--n-trials",
+        type=int,
+        default=10,
+        help="Max candidates to try when --strategy=random (ignored for grid).",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=0, help="Random seed for --strategy=random."
+    )
     args = parser.parse_args(argv)
 
     default_space = SearchSpace()
@@ -280,6 +344,9 @@ def main(argv: list[str] | None = None) -> None:
         n_test=args.n_test,
         epochs=args.epochs,
         device=args.device,
+        strategy=args.strategy,
+        n_trials=args.n_trials,
+        seed=args.seed,
     )
 
     print(f"Tried {len(trials)} candidate(s):")

@@ -305,6 +305,39 @@ def test_cli_main_wires_search_flags_into_pipeline_config(monkeypatch, tmp_path)
     assert config.search_space.fno_width == [8]
 
 
+def test_cli_main_wires_search_strategy_flags_into_pipeline_config(
+    monkeypatch, tmp_path
+):
+    captured_config = {}
+
+    def fake_run_pipeline(config: pipeline.PipelineConfig):
+        captured_config["config"] = config
+        return {"darcy": []}
+
+    monkeypatch.setattr(pipeline, "run_pipeline", fake_run_pipeline)
+
+    pipeline.main(
+        [
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--equation",
+            "darcy",
+            "--search",
+            "--search-strategy",
+            "random",
+            "--search-n-trials",
+            "3",
+            "--search-seed",
+            "7",
+        ]
+    )
+
+    config = captured_config["config"]
+    assert config.search_strategy == "random"
+    assert config.search_n_trials == 3
+    assert config.search_seed == 7
+
+
 @pytest.mark.skipif(not DARCY_FILE.exists(), reason="Darcy sample not downloaded")
 def test_run_pipeline_darcy_only_end_to_end_smoke(tmp_path):
     run_dir = tmp_path / "run"

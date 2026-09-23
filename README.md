@@ -204,7 +204,7 @@ Navier-Stokes needs more *data*, not just more epochs, to get meaningful numbers
 
 ## Hyperparameter Search
 
-`fno-search` grid-searches FNO/DeepONet hyperparameters (`lr`, `fno_width`, `deeponet_hidden_dim`, ...) on a **small data subset** with **few epochs** (fast), then reports the winner -- so you don't have to guess before spending real compute on a full-data run:
+`fno-search` searches FNO/DeepONet hyperparameters (`lr`, `fno_width`, `deeponet_hidden_dim`, ...) on a **small data subset** with **few epochs** (fast), then reports the winner -- so you don't have to guess before spending real compute on a full-data run:
 
 ```bash
 uv run fno-search darcy --file data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5 \
@@ -213,7 +213,16 @@ uv run fno-search darcy --file data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Tr
   --results-file runs/search/darcy.json
 ```
 
-It's a small, dependency-free grid search (Cartesian product over whichever knobs you pass candidates for), not a general HPO framework -- ranking is by combined FNO + DeepONet test $L^2$ error on the subset. PINN is always skipped during search (it fits one instance, not an operator, so it doesn't share these hyperparameters meaningfully, and it's cheap enough to just run once at full scale).
+Two dependency-free strategies (`--strategy`), not a general HPO framework -- ranking is always by combined FNO + DeepONet test $L^2$ error on the subset:
+- **`grid`** (default): exhaustive Cartesian product over whichever knobs you pass candidates for. Simple and complete, but combinatorial -- 3 candidates on 3 knobs is already 27 trials.
+- **`random`**: samples up to `--n-trials` unique combinations at random (`--seed` for reproducibility). Usually more efficient than grid search for the same budget once more than a couple of knobs have multiple candidates ([Bergstra & Bengio, 2012](https://www.jmlr.org/papers/v13/bergstra12a.html)), and its cost doesn't explode as candidates grow:
+  ```bash
+  uv run fno-search darcy --file data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5 \
+    --lr 1e-3 --lr 5e-4 --lr 1e-4 --fno-width 8 --fno-width 16 --fno-width 32 \
+    --strategy random --n-trials 4
+  ```
+
+PINN is always skipped during search (it fits one instance, not an operator, so it doesn't share these hyperparameters meaningfully, and it's cheap enough to just run once at full scale).
 
 **The "search on a subset, then train on the full data" workflow is automated end to end via `fno-pipeline --search`** -- see [Pipeline](#pipeline) below: it runs the search first, saves the winner, and feeds it straight into the full-data benchmark step.
 
@@ -258,7 +267,7 @@ runs/demo/
 2. **Training epoch level** -- each `benchmark_<eq>` step passes its own `checkpoint_dir`, so even if that step itself gets interrupted mid-training, retrying it resumes FNO/DeepONet from their last saved epoch (via `trainer.fit()`) instead of restarting. PINN isn't checkpointed (it retrains from scratch on retry, which is cheap -- seconds, not minutes, since it fits a single instance).
 3. **Search trial level** -- search trials themselves aren't individually checkpointed (they're small/fast by design), so an interrupted `search_<eq>` step restarts the grid from scratch on retry -- but once it completes, its result is durable (level 1).
 
-Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `--force` (ignore saved state and redo every step), `--device`, `--search` (+ `--search-lr`/`--search-fno-width`/`--search-deeponet-hidden-dim`, each repeatable, + `--search-n-train`/`--search-n-test`/`--search-epochs`).
+Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `--force` (ignore saved state and redo every step), `--device`, `--search` (+ `--search-lr`/`--search-fno-width`/`--search-deeponet-hidden-dim`, each repeatable, + `--search-n-train`/`--search-n-test`/`--search-epochs`, + `--search-strategy {grid,random}`/`--search-n-trials`/`--search-seed` for the `random` strategy).
 
 ## Development
 

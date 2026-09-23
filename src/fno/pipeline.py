@@ -36,7 +36,12 @@ from fno.benchmarks.harness import (
     save_results,
 )
 from fno.benchmarks.plots import plot_benchmark_summary, plot_cross_equation_errors
-from fno.benchmarks.search import SearchSpace, load_best_hyperparams, save_search_result
+from fno.benchmarks.search import (
+    STRATEGIES,
+    SearchSpace,
+    load_best_hyperparams,
+    save_search_result,
+)
 from fno.benchmarks.search import search_hyperparams as _search_hyperparams
 from fno.data.download import main as download_main
 
@@ -71,6 +76,9 @@ class PipelineConfig:
     search_n_train: int = 256
     search_n_test: int = 64
     search_epochs: int = 5
+    search_strategy: str = "grid"  # "grid" or "random"
+    search_n_trials: int = 10  # only used when search_strategy="random"
+    search_seed: int = 0
 
 
 def _state_path(run_dir: Path) -> Path:
@@ -218,6 +226,9 @@ def _run_equation_pipeline(
                 n_test=config.search_n_test,
                 epochs=config.search_epochs,
                 device=config.device,
+                strategy=config.search_strategy,
+                n_trials=config.search_n_trials,
+                seed=config.search_seed,
             )
             save_search_result(best_hp, trials, search_result_path)
 
@@ -386,6 +397,26 @@ def main(argv: list[str] | None = None) -> None:
         action="append",
         help="Repeatable candidate values for --search (default: per-equation default, 64).",
     )
+    parser.add_argument(
+        "--search-strategy",
+        choices=list(STRATEGIES),
+        default="grid",
+        help=(
+            "'grid': try every combination. 'random': sample up to "
+            "--search-n-trials unique combinations (usually more efficient "
+            "once more than a couple of --search-* flags have multiple "
+            "values). Default: grid."
+        ),
+    )
+    parser.add_argument(
+        "--search-n-trials",
+        type=int,
+        default=10,
+        help="Max candidates to try when --search-strategy=random (ignored for grid).",
+    )
+    parser.add_argument(
+        "--search-seed", type=int, default=0, help="Random seed for --search-strategy=random."
+    )
     args = parser.parse_args(argv)
 
     default_space = SearchSpace()
@@ -419,6 +450,9 @@ def main(argv: list[str] | None = None) -> None:
         search_n_train=args.search_n_train,
         search_n_test=args.search_n_test,
         search_epochs=args.search_epochs,
+        search_strategy=args.search_strategy,
+        search_n_trials=args.search_n_trials,
+        search_seed=args.search_seed,
     )
 
     results_by_equation = run_pipeline(config)
