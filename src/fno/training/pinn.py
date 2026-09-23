@@ -83,15 +83,17 @@ def train_pinn_burgers(
 
     history: list[float] = []
     for _ in range(epochs):
-        x_c = (torch.rand(n_collocation, 1, device=device_) * (x_hi - x_lo) + x_lo).requires_grad_(
-            True
-        )
-        t_c = (torch.rand(n_collocation, 1, device=device_) * (t_hi - t_lo) + t_lo).requires_grad_(
-            True
-        )
+        x_c = (
+            torch.rand(n_collocation, 1, device=device_) * (x_hi - x_lo) + x_lo
+        ).requires_grad_(True)
+        t_c = (
+            torch.rand(n_collocation, 1, device=device_) * (t_hi - t_lo) + t_lo
+        ).requires_grad_(True)
 
         optimizer.zero_grad()
-        loss, _residual_loss, _ic_loss = burgers_pinn_loss(model, x_c, t_c, nu, x_ic, u_ic)
+        loss, _residual_loss, _ic_loss = burgers_pinn_loss(
+            model, x_c, t_c, nu, x_ic, u_ic
+        )
         loss.backward()
         optimizer.step()
         history.append(loss.item())

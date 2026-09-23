@@ -62,7 +62,9 @@ def test_burgers_pinn_loss_gradients_flow():
     x_ic = torch.linspace(-1, 1, 10).unsqueeze(-1)
     u_ic = -torch.sin(torch.pi * x_ic)
 
-    loss, residual_loss, ic_loss = burgers_pinn_loss(model, x_c, t_c, nu=0.01, x_ic=x_ic, u_ic=u_ic)
+    loss, residual_loss, ic_loss = burgers_pinn_loss(
+        model, x_c, t_c, nu=0.01, x_ic=x_ic, u_ic=u_ic
+    )
     loss.backward()
 
     grad = next(model.parameters()).grad
