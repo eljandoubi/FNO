@@ -3,6 +3,7 @@
 <p align="center"><em>Fourier Neural Operator, DeepONet, and PINN -- implemented, tested, and benchmarked head-to-head on the same PDE data.</em></p>
 
 <p align="center">
+  <a href="https://github.com/eljandoubi/FNO/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/eljandoubi/FNO/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://www.python.org/"><img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-blue"></a>
   <a href="https://pytorch.org/"><img alt="PyTorch 2.14+" src="https://img.shields.io/badge/PyTorch-2.14%2B-ee4c2c"></a>
   <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/badge/managed%20by-uv-8A2BE2"></a>
@@ -275,6 +276,8 @@ Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `
 uv run pytest -v    # unit tests
 uv run ruff check   # lint
 ```
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs both on every push/PR to `main` via GitHub Actions. Real-data-conditional tests are skipped there (no PDEBench data is downloaded in CI) -- they run locally once you've run `fno-download`.
 
 ## License
 
