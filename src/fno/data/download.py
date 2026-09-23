@@ -230,7 +230,9 @@ def _list_datasets() -> None:
         print(f"  {key:<24} {spec.description}")
         if len(spec.files) > 1:
             variants = ", ".join(sorted(spec.files))
-            print(f"      variants (--variant): {variants}  [default: {spec.default_variant}]")
+            print(
+                f"      variants (--variant): {variants}  [default: {spec.default_variant}]"
+            )
 
 
 def _download_variant(
@@ -248,7 +250,9 @@ def _download_variant(
         else (dataset_dest / file_spec.filename).exists()
     )
     if already_present and not force:
-        print(f"  already present, skipping: {file_spec.filename} (use --force to re-download)")
+        print(
+            f"  already present, skipping: {file_spec.filename} (use --force to re-download)"
+        )
         return
     if extract and force and dataset_dest.exists():
         shutil.rmtree(dataset_dest)
