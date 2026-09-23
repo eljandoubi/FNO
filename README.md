@@ -1,15 +1,38 @@
 # FNO
 
+<p align="center"><em>Fourier Neural Operator, DeepONet, and PINN -- implemented, tested, and benchmarked head-to-head on the same PDE data.</em></p>
+
+<p align="center">
+  <a href="https://www.python.org/"><img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-blue"></a>
+  <a href="https://pytorch.org/"><img alt="PyTorch 2.14+" src="https://img.shields.io/badge/PyTorch-2.14%2B-ee4c2c"></a>
+  <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/badge/managed%20by-uv-8A2BE2"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green"></a>
+</p>
+
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [Getting Started](#getting-started)
+- [Project Layout](#project-layout)
+- [Data](#data)
+- [Models](#models)
+- [Benchmark](#benchmark)
+- [Pipeline](#pipeline)
+- [Development](#development)
+- [License](#license)
+
 ## Executive Summary
 
-This repository provides a high-performance **Fourier Neural Operator (FNO)** implementation in PyTorch designed for fast, mesh-independent surrogate modeling of complex fluid dynamics and non-linear partial differential equations (PDEs). 
+This repository implements and rigorously compares three operator-learning / PDE-solving architectures in PyTorch -- **Fourier Neural Operator (FNO)**, **DeepONet**, and **Physics-Informed Neural Networks (PINN)** -- on three benchmark PDEs from [PDEBench](https://github.com/pdebench/PDEBench): **Darcy Flow (2D)**, **Burgers' equation (1D)**, and **incompressible Navier-Stokes (2D)**.
 
-Developed as part of a Scientific Machine Learning benchmark (MVA / ENSTA Paris), this project evaluates operator learning architectures (**FNO**, **DeepONet**, and **PINNs**) on benchmark physical systems such as 2D Navier-Stokes and 1D/2D Burgers' equations.
+Built as a Scientific Machine Learning benchmark (MVA / ENSTA Paris), the emphasis throughout is on **honest, verified results**: every model/equation combination is backed by a test against real downloaded data, super-resolution claims are checked against native high-resolution ground truth rather than synthetic upsampling, and PINN's fundamentally different (non-operator) setup is explicitly flagged everywhere it's compared to FNO/DeepONet instead of being silently averaged in.
 
-### Key Highlights
-- **Resolution Independence:** Learns mapping between continuous function spaces, enabling zero-shot super-resolution (e.g., training on $64 \times 64$ resolution grids and evaluating directly on $256 \times 256$ meshes without fine-tuning).
-- **100x Speedup:** Accelerates numerical field evaluation by up to two orders of magnitude compared to traditional Finite Element Method (FEM) solvers, achieving $< 2\%$ relative $L^2$ error.
-- **Modern Python Tooling:** Managed via [`uv`](https://github.com/astral-sh/uv) for lightning-fast, reproducible dependency management and environment isolation.
+### Highlights
+
+- **Full 3x3 coverage** -- FNO, DeepONet, and PINN are all implemented and tested against all three equations (see the [coverage table](#models)).
+- **Genuine zero-shot super-resolution** -- operators train at low resolution and are evaluated directly against PDEBench's native high-resolution ground truth, never synthetic/interpolated data.
+- **One command, fully resumable** -- `fno-pipeline` runs download -> train -> evaluate -> benchmark -> plot end to end, and safely resumes after any interruption (see [Pipeline](#pipeline)).
+- **Modern tooling** -- managed by [`uv`](https://github.com/astral-sh/uv) for fast, reproducible installs.
 
 ## Getting Started
 
@@ -19,7 +42,25 @@ Requires [`uv`](https://github.com/astral-sh/uv) (Python 3.12 is pinned via `.py
 uv sync
 ```
 
-This creates a `.venv` with all runtime and development dependencies (PyTorch, NumPy, SciPy, h5py, Weights & Biases, pytest, ruff, ...) locked in `uv.lock`.
+This creates a `.venv` with all runtime and development dependencies (PyTorch, NumPy, SciPy, h5py, Matplotlib, Weights & Biases, pytest, ruff, ...) locked in `uv.lock`.
+
+```bash
+uv run fno-download pdebench-darcy2d      # grab a sample dataset
+uv run fno-benchmark --equation darcy     # train + compare FNO / DeepONet / PINN
+uv run fno-pipeline --run-dir runs/demo   # or: run everything end to end, resumably
+```
+
+## Project Layout
+
+```
+src/fno/
+├── data/          download CLI, PyTorch Dataset classes, HDF5 inspector
+├── models/        FNO1d / FNO2d, DeepONet, PINN architectures
+├── training/      generic trainer (checkpoint/resume), collate adapters, PINN losses
+├── benchmarks/    FNO vs DeepONet vs PINN comparison harness + plotting
+└── pipeline.py    resumable end-to-end orchestrator (fno-pipeline)
+tests/             one test file per module; real-data smoke tests where relevant
+```
 
 ## Data
 
@@ -126,7 +167,9 @@ PINN (single-instance fit)      16,897        6.54       41.12    0.9968        
     note: fit to ONE instance, not an operator -- not directly comparable to the rows above
 ```
 
-*(Example output at the small defaults above -- few epochs, not tuned for accuracy. Increase `--epochs`/`--n-train` for meaningful numbers; the point of the default is to run fast.)*
+![Example FNO vs DeepONet vs PINN comparison plot on Darcy Flow, generated by fno-pipeline from the numbers above](docs/assets/darcy_benchmark_example.png)
+
+*(Example output at the small defaults above -- few epochs, not tuned for accuracy. Increase `--epochs`/`--n-train` for meaningful numbers; the point of the default is to run fast. The plot is real output from `fno.benchmarks.plots.plot_benchmark_summary`, rendered from these exact numbers.)*
 
 **The super-resolution check is real, not approximated**: for Darcy/Burgers, FNO/DeepONet train on fields **downsampled 2x/4x**, then get evaluated directly against PDEBench's **native-resolution** ground truth -- no synthetic high-res data needed, since the dataset already has it. Navier-Stokes uses two separately-strided readouts of the same shard(s) instead (`--low-res-stride`/`--high-res-stride` inside `run_navier_stokes_benchmark`). This also surfaces a genuine architectural difference: FNO is resolution-independent on both input and output, but DeepONet's branch net has a fixed sensor count from training, so its super-resolution check keeps the branch input at low-res while only the trunk's query grid goes high-res (see `_DeepONetSuperresView` / `_DeepONetSuperres1DView` / `_DeepONetNSSuperresView` in `fno/benchmarks/harness.py`).
 
@@ -140,6 +183,16 @@ Results can be persisted as JSON (`--results-file path.json`) via `save_results`
 
 ```bash
 uv run fno-pipeline --run-dir runs/demo --epochs 20 --pinn-epochs 500
+```
+
+```mermaid
+flowchart LR
+    subgraph EQ["per equation: darcy / burgers / navier_stokes"]
+        direction LR
+        A[download] --> B["benchmark<br/>(FNO + DeepONet + PINN)"]
+        B --> C[plot]
+    end
+    C --> D["report.md +<br/>cross-equation plot"]
 ```
 
 This downloads (if missing) each equation's default dataset variant, benchmarks FNO/DeepONet/PINN on it, saves results as JSON, and renders a PNG comparison plot -- writing everything under `--run-dir`:
@@ -167,4 +220,7 @@ uv run pytest -v    # unit tests
 uv run ruff check   # lint
 ```
 
+## License
+
+[Apache License 2.0](LICENSE).
 
