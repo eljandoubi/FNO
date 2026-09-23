@@ -24,6 +24,7 @@ dependencies = [
 [project.scripts]
 fno-download = "fno.data.download:main"
 fno-inspect-h5 = "fno.data.inspect_h5:main"
+fno-benchmark = "fno.benchmarks.harness:main"
 
 [build-system]
 requires = ["uv_build>=0.12.16,<0.13.0"]

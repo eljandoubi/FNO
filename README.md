@@ -109,6 +109,28 @@ history = train_pinn_navier_stokes(
 )
 ```
 
+## Benchmark
+
+`fno-benchmark` trains FNO2d and DeepONet on the same Darcy Flow data and fits a PINN to one held-out instance, then prints a comparison table (parameter count, train/inference time, relative $L^2$ error, and a genuine zero-shot super-resolution check):
+
+```bash
+uv run fno-benchmark --n-train 512 --n-test 64 --epochs 20 --pinn-epochs 500
+```
+
+```
+Model                           Params   Train (s)  Infer (ms)   Test L2   Superres L2
+--------------------------------------------------------------------------------------
+FNO2d                        1,186,177       18.36       42.99    0.5166        0.5179
+DeepONet                       607,361        2.09        1.93    0.3807        0.3823
+PINN (single-instance fit)      16,897        6.54       41.12    0.9968           n/a
+    note: fit to ONE instance, not an operator -- not directly comparable to the rows above
+```
+
+*(Example output at the small defaults above -- few epochs, not tuned for accuracy. Increase `--epochs`/`--n-train` for meaningful numbers; the point of the default is to run fast.)*
+
+**The super-resolution check is real, not approximated**: FNO/DeepONet train on Darcy fields **downsampled to 64x64**, then get evaluated directly against PDEBench's **native 128x128** ground truth -- no synthetic high-res data needed, since the dataset already has it. This also surfaces a genuine architectural difference: FNO is resolution-independent on both input and output, but DeepONet's branch net has a fixed sensor count from training, so its super-resolution check keeps the branch input at 64x64 while only the trunk's query grid goes to 128x128 (see `_DeepONetSuperresView` in `fno/benchmarks/harness.py`).
+
+PINN's row isn't a fair comparison to the two operators above it and is labeled as such: it fits one specific field via its own physics residual rather than learning from many training samples, so "training cost" and "generalization error" mean different things for it.
 
 ## Development
 
