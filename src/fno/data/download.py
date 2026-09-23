@@ -112,7 +112,9 @@ def main(argv: list[str] | None = None) -> None:
     archive_path = args.cache_dir / spec.archive_name
 
     if dataset_dest.exists() and any(dataset_dest.iterdir()) and not args.force:
-        print(f"'{spec.name}' already present at {dataset_dest} (use --force to re-download).")
+        print(
+            f"'{spec.name}' already present at {dataset_dest} (use --force to re-download)."
+        )
         return
     if args.force and dataset_dest.exists():
         shutil.rmtree(dataset_dest)
