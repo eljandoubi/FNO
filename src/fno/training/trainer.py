@@ -39,13 +39,16 @@ def train_one_epoch(
     device: torch.device,
     loss_fn: Callable = nn.functional.mse_loss,
 ) -> float:
+    """One training epoch. Each batch is (*model_inputs, targets) -- e.g. (input,
+    targets) for FNO, or (branch_input, trunk_input, targets) for DeepONet.
+    """
     model.train()
     total_loss = 0.0
     n_batches = 0
-    for inputs, targets in dataloader:
-        inputs, targets = inputs.to(device), targets.to(device)
+    for batch in dataloader:
+        *inputs, targets = (t.to(device) for t in batch)
         optimizer.zero_grad()
-        preds = model(inputs)
+        preds = model(*inputs)
         loss = loss_fn(preds, targets)
         loss.backward()
         optimizer.step()
@@ -59,9 +62,9 @@ def evaluate(model: nn.Module, dataloader: DataLoader, device: torch.device) -> 
     model.eval()
     total_error = 0.0
     n_batches = 0
-    for inputs, targets in dataloader:
-        inputs, targets = inputs.to(device), targets.to(device)
-        preds = model(inputs)
+    for batch in dataloader:
+        *inputs, targets = (t.to(device) for t in batch)
+        preds = model(*inputs)
         total_error += relative_l2_error(preds, targets).item()
         n_batches += 1
     return total_error / n_batches

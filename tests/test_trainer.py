@@ -12,9 +12,15 @@ import torch
 from torch.utils.data import DataLoader, Subset, TensorDataset
 
 from fno.data.pdebench import Burgers1DDataset, DarcyFlowDataset, NavierStokes2DDataset
+from fno.models.deeponet import DeepONet
 from fno.models.fno import FNO1d, FNO2d
 from fno.training import trainer
-from fno.training.collate import burgers_collate, darcy_collate, navier_stokes_collate
+from fno.training.collate import (
+    burgers_collate,
+    darcy_collate,
+    darcy_deeponet_collate,
+    navier_stokes_collate,
+)
 
 DARCY_FILE = Path("data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5")
 BURGERS_FILE = Path("data/raw/pdebench-burgers1d/1D_Burgers_Sols_Nu0.01.hdf5")
@@ -41,6 +47,17 @@ def test_darcy_collate_shapes():
     inputs, targets = darcy_collate(batch)
     assert inputs.shape == (2, 8, 8, 3)
     assert targets.shape == (2, 8, 8, 1)
+
+
+def test_darcy_deeponet_collate_shapes():
+    field = torch.randn(1, 8, 8)
+    target = torch.randn(1, 8, 8)
+    grid = torch.randn(8, 8, 2)
+    batch = [(field, target, grid), (field, target, grid)]
+    branch_input, trunk_input, targets = darcy_deeponet_collate(batch)
+    assert branch_input.shape == (2, 64)
+    assert trunk_input.shape == (64, 2)
+    assert targets.shape == (2, 64, 1)
 
 
 def test_burgers_collate_shapes():
@@ -233,4 +250,29 @@ def test_fit_on_small_real_navier_stokes_subset():
     history = trainer.fit(model, train_loader, val_loader, config)
 
     assert len(history["train_loss"]) == 1
+    assert all(v >= 0 for v in history["val_l2_error"])
+
+
+@pytest.mark.skipif(not DARCY_FILE.exists(), reason="Darcy sample not downloaded")
+def test_fit_deeponet_on_small_real_darcy_subset():
+    ds = DarcyFlowDataset(DARCY_FILE, split="train")
+    # Mechanics check only -- not a real train/val split or accuracy benchmark.
+    train_loader = DataLoader(
+        Subset(ds, range(16)), batch_size=4, collate_fn=darcy_deeponet_collate
+    )
+    val_loader = DataLoader(
+        Subset(ds, range(16, 24)), batch_size=4, collate_fn=darcy_deeponet_collate
+    )
+
+    model = DeepONet(
+        branch_input_dim=128 * 128,
+        trunk_input_dim=2,
+        hidden_dim=32,
+        latent_dim=16,
+        out_channels=1,
+    )
+    config = trainer.TrainConfig(epochs=2, lr=1e-3, device="cpu", use_wandb=False)
+    history = trainer.fit(model, train_loader, val_loader, config)
+
+    assert len(history["train_loss"]) == 2
     assert all(v >= 0 for v in history["val_l2_error"])

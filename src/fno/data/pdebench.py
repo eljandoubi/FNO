@@ -101,8 +101,9 @@ class DarcyFlowDataset(Dataset):
 class Burgers1DDataset(Dataset):
     """1D Burgers' equation: initial timesteps -> full spatio-temporal solution.
 
-    Expects a PDEBench-style HDF5 file with "tensor" (N, T, X) and
-    "x-coordinate" keys (each file is a single fixed viscosity).
+    Expects a PDEBench-style HDF5 file with "tensor" (N, T, X), "x-coordinate"
+    (X,), and "t-coordinate" ((T+1,) or (T,)) keys (each file is a single fixed
+    viscosity). `self.t` is aligned to the tensor's T timesteps.
     """
 
     def __init__(
@@ -115,15 +116,19 @@ class Burgers1DDataset(Dataset):
         self.file_path = Path(file_path)
         self.initial_step = initial_step
         with h5py.File(self.file_path, "r") as f:
-            _require_keys(set(f.keys()), {"tensor", "x-coordinate"}, self.file_path)
+            _require_keys(
+                set(f.keys()), {"tensor", "x-coordinate", "t-coordinate"}, self.file_path
+            )
             tensor = np.asarray(f["tensor"], dtype=np.float32)  # (N, T, X)
             x = np.asarray(f["x-coordinate"], dtype=np.float32)
+            t_coord = np.asarray(f["t-coordinate"], dtype=np.float32)
 
         n_samples = tensor.shape[0]
         sel = _split_slice(n_samples, split, split_fractions)
 
         self.data = torch.from_numpy(tensor[sel])  # (N, T, X)
         self.grid = torch.from_numpy(x).unsqueeze(-1)  # (X, 1)
+        self.t = torch.from_numpy(t_coord[: tensor.shape[1]])  # (T,)
 
     def __len__(self) -> int:
         return self.data.shape[0]

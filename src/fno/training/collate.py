@@ -1,5 +1,5 @@
 """Adapters that turn a PDEBench Dataset's (field, target, grid) triplets into
-the channel-last (input, target) tensors that fno.models.fno expects."""
+the tensors that fno.models.fno / fno.models.deeponet expect."""
 
 from __future__ import annotations
 
@@ -60,3 +60,57 @@ def navier_stokes_collate(
     trajectories = torch.stack(trajectories)  # (B, T, 2, H, W)
     targets = trajectories[:, -1].permute(0, 2, 3, 1)  # (B, H, W, 2) -- final timestep
     return inputs, targets
+
+
+def darcy_deeponet_collate(
+    batch: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Collate for DarcyFlowDataset -> DeepONet.
+
+    Branch input: flattened permeability field, (B, H*W). Trunk input: shared
+    grid coordinates, (H*W, 2). Target: pressure field at every grid point,
+    (B, H*W, 1).
+    """
+    fields, targets, grids = zip(*batch, strict=True)
+    fields = torch.stack(fields)  # (B, 1, H, W)
+    branch_input = fields.reshape(fields.shape[0], -1)  # (B, H*W)
+    trunk_input = grids[0].reshape(-1, 2)  # (H*W, 2)
+    targets = torch.stack(targets).permute(0, 2, 3, 1).reshape(fields.shape[0], -1, 1)
+    return branch_input, trunk_input, targets
+
+
+def burgers_deeponet_collate(
+    batch: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Collate for Burgers1DDataset -> DeepONet.
+
+    Branch input: flattened initial window, (B, initial_step*X). Trunk input:
+    shared grid coordinates, (X, 1). Target: final timestep, (B, X, 1).
+    """
+    windows, trajectories, grids = zip(*batch, strict=True)
+    windows = torch.stack(windows)  # (B, initial_step, X)
+    branch_input = windows.reshape(windows.shape[0], -1)  # (B, initial_step*X)
+    trunk_input = grids[0]  # (X, 1)
+
+    trajectories = torch.stack(trajectories)  # (B, T, X)
+    targets = trajectories[:, -1, :].unsqueeze(-1)  # (B, X, 1) -- final timestep
+    return branch_input, trunk_input, targets
+
+
+def navier_stokes_deeponet_collate(
+    batch: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Collate for NavierStokes2DDataset -> DeepONet.
+
+    Branch input: flattened initial velocity frames, (B, initial_step*2*H*W).
+    Trunk input: shared grid coordinates, (H*W, 2). Target: final-timestep
+    velocity at every grid point, (B, H*W, 2).
+    """
+    windows, trajectories, grids = zip(*batch, strict=True)
+    windows = torch.stack(windows)  # (B, initial_step, 2, H, W)
+    branch_input = windows.reshape(windows.shape[0], -1)  # (B, initial_step*2*H*W)
+    trunk_input = grids[0].reshape(-1, 2)  # (H*W, 2)
+
+    trajectories = torch.stack(trajectories)  # (B, T, 2, H, W)
+    targets = trajectories[:, -1].permute(0, 2, 3, 1).reshape(windows.shape[0], -1, 2)
+    return branch_input, trunk_input, targets
