@@ -112,17 +112,54 @@ def test_checkpoint_roundtrip(tmp_path):
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     path = tmp_path / "ckpt.pt"
-    trainer.save_checkpoint(model, optimizer, epoch=5, path=path)
+    history = {"train_loss": [0.5, 0.3], "val_l2_error": [0.9, 0.7]}
+    trainer.save_checkpoint(model, optimizer, epoch=5, path=path, history=history)
 
     new_model = FNO2d(
         modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
     )
     new_optimizer = torch.optim.Adam(new_model.parameters(), lr=1e-3)
-    epoch = trainer.load_checkpoint(new_model, new_optimizer, path)
+    epoch, loaded_history = trainer.load_checkpoint(new_model, new_optimizer, path)
 
     assert epoch == 5
+    assert loaded_history == history
     for p1, p2 in zip(model.parameters(), new_model.parameters(), strict=True):
         assert torch.equal(p1, p2)
+
+
+def test_fit_resumes_from_checkpoint_instead_of_restarting(tmp_path):
+    torch.manual_seed(0)
+    checkpoint_path = tmp_path / "ckpt.pt"
+    train_loader = _make_synthetic_loader()
+    val_loader = _make_synthetic_loader()
+
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
+    config = trainer.TrainConfig(
+        epochs=3, device="cpu", use_wandb=False, checkpoint_path=str(checkpoint_path)
+    )
+    first_history = trainer.fit(model, train_loader, val_loader, config)
+    assert len(first_history["train_loss"]) == 3
+
+    # Simulate resuming after an interruption: same checkpoint_path, more epochs requested.
+    resumed_model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
+    resumed_config = trainer.TrainConfig(
+        epochs=5, device="cpu", use_wandb=False, checkpoint_path=str(checkpoint_path)
+    )
+    second_history = trainer.fit(
+        resumed_model, train_loader, val_loader, resumed_config
+    )
+
+    assert len(second_history["train_loss"]) == 5
+    # The first 3 entries must be untouched (not recomputed) -- proof it actually resumed.
+    assert second_history["train_loss"][:3] == first_history["train_loss"]
+
+    # Calling fit() again with the same (already-reached) epoch count is a no-op.
+    noop_history = trainer.fit(resumed_model, train_loader, val_loader, resumed_config)
+    assert noop_history == second_history
 
 
 class _FakeRun:

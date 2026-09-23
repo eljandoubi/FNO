@@ -71,18 +71,27 @@ def evaluate(model: nn.Module, dataloader: DataLoader, device: torch.device) -> 
 
 
 def save_checkpoint(
-    model: nn.Module, optimizer: torch.optim.Optimizer, epoch: int, path: str | Path
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    path: str | Path,
+    history: dict[str, list[float]] | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
     torch.save(
         {
             "epoch": epoch,
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
+            "history": history or {},
         },
-        path,
+        tmp_path,
     )
+    tmp_path.replace(
+        path
+    )  # atomic on the same filesystem -- avoids a half-written file if interrupted
 
 
 def load_checkpoint(
@@ -90,12 +99,15 @@ def load_checkpoint(
     optimizer: torch.optim.Optimizer | None,
     path: str | Path,
     map_location: str | None = None,
-) -> int:
+) -> tuple[int, dict[str, list[float]]]:
+    """Returns (epoch, history) -- `epoch` is the number of epochs already
+    completed, i.e. training should resume starting at `range(epoch, ...)`.
+    """
     checkpoint = torch.load(path, map_location=map_location)
     model.load_state_dict(checkpoint["model_state"])
     if optimizer is not None:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
-    return checkpoint["epoch"]
+    return checkpoint["epoch"], checkpoint.get("history", {})
 
 
 @dataclass
@@ -114,10 +126,25 @@ def fit(
     val_loader: DataLoader,
     config: TrainConfig,
 ) -> dict[str, list[float]]:
-    """Run a full training loop, optionally logging to W&B. Returns per-epoch history."""
+    """Run a full training loop, optionally logging to W&B. Returns per-epoch
+    history. If `config.checkpoint_path` already exists, resumes from the
+    saved epoch/history instead of retraining from scratch (and saves after
+    every epoch, so an interrupted run can always be resumed by calling this
+    again with the same checkpoint_path). If the checkpoint already covers
+    `config.epochs`, this is a no-op that just returns the saved history.
+    """
     device = torch.device(config.device)
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+
+    start_epoch = 0
+    history: dict[str, list[float]] = {"train_loss": [], "val_l2_error": []}
+    if config.checkpoint_path and Path(config.checkpoint_path).exists():
+        start_epoch, loaded_history = load_checkpoint(
+            model, optimizer, config.checkpoint_path, map_location=str(device)
+        )
+        history["train_loss"] = list(loaded_history.get("train_loss", []))
+        history["val_l2_error"] = list(loaded_history.get("val_l2_error", []))
 
     run = (
         wandb.init(project=config.wandb_project, config=asdict(config))
@@ -125,8 +152,7 @@ def fit(
         else None
     )
 
-    history: dict[str, list[float]] = {"train_loss": [], "val_l2_error": []}
-    for epoch in range(config.epochs):
+    for epoch in range(start_epoch, config.epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         val_error = evaluate(model, val_loader, device)
         history["train_loss"].append(train_loss)
@@ -135,11 +161,12 @@ def fit(
             run.log(
                 {"epoch": epoch, "train_loss": train_loss, "val_l2_error": val_error}
             )
+        if config.checkpoint_path:
+            save_checkpoint(
+                model, optimizer, epoch + 1, config.checkpoint_path, history
+            )
 
     if run is not None:
         run.finish()
-
-    if config.checkpoint_path:
-        save_checkpoint(model, optimizer, config.epochs, config.checkpoint_path)
 
     return history
