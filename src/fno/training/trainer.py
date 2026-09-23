@@ -87,7 +87,9 @@ def save_checkpoint(
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
             "history": history or {},
-            "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
+            "scheduler_state": scheduler.state_dict()
+            if scheduler is not None
+            else None,
         },
         tmp_path,
     )

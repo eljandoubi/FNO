@@ -72,8 +72,16 @@ def test_deeponet_superres_view_keeps_field_low_res_but_target_grid_high_res(tmp
     base = DarcyFlowDataset(path, split="train", split_fractions=(1.0, 0.0, 0.0))
     view = _DeepONetSuperresView(base, stride=2)
     field, target, grid = view[0]
-    assert field.shape == (1, 8, 8)  # downsampled -- matches the branch's fixed sensor count
-    assert target.shape == (1, 16, 16)  # native resolution -- real ground truth, not approximated
+    assert field.shape == (
+        1,
+        8,
+        8,
+    )  # downsampled -- matches the branch's fixed sensor count
+    assert target.shape == (
+        1,
+        16,
+        16,
+    )  # native resolution -- real ground truth, not approximated
     assert grid.shape == (16, 16, 2)
 
     batch = [view[0], view[1]]
@@ -86,7 +94,11 @@ def test_deeponet_superres_view_keeps_field_low_res_but_target_grid_high_res(tmp
 def test_format_summary_includes_all_rows_and_note():
     results = [
         BenchmarkResult(
-            name="FNO2d", n_parameters=1000, train_time_s=1.5, inference_latency_ms=2.0, test_l2_error=0.05
+            name="FNO2d",
+            n_parameters=1000,
+            train_time_s=1.5,
+            inference_latency_ms=2.0,
+            test_l2_error=0.05,
         ),
         BenchmarkResult(
             name="PINN (single-instance fit)",
@@ -113,10 +125,14 @@ def test_benchmark_operator_mechanics():
     train_loader = DataLoader(Subset(ds, range(12)), batch_size=4)
     test_loader = DataLoader(Subset(ds, range(12, 16)), batch_size=4)
 
-    model = FNO2d(modes1=4, modes2=4, width=8, in_channels=c_in, out_channels=c_out, n_layers=2)
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=c_in, out_channels=c_out, n_layers=2
+    )
     config = trainer.TrainConfig(epochs=2, device="cpu", use_wandb=False)
 
-    result = benchmark_operator("FNO2d-toy", model, train_loader, test_loader, config, test_loader)
+    result = benchmark_operator(
+        "FNO2d-toy", model, train_loader, test_loader, config, test_loader
+    )
 
     assert result.n_parameters > 0
     assert result.train_time_s >= 0

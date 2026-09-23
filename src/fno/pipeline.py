@@ -270,7 +270,9 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Re-run every step even if already marked completed.",
     )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate for FNO/DeepONet/PINN.")
+    parser.add_argument(
+        "--lr", type=float, default=1e-3, help="Learning rate for FNO/DeepONet/PINN."
+    )
     parser.add_argument(
         "--scheduler-step",
         type=int,

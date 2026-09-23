@@ -99,7 +99,6 @@ def load_results(path: str | Path) -> list[BenchmarkResult]:
     return [BenchmarkResult(**d) for d in data]
 
 
-
 class _DownsampledDarcyView(Dataset):
     """Wraps a DarcyFlowDataset, strided-downsampling field/target/grid (e.g.
     128x128 -> 64x64) -- used to build the "low-res training data" side of the
@@ -921,7 +920,9 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Save the combined results (all benchmarked equations) as JSON here.",
     )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate for FNO/DeepONet/PINN.")
+    parser.add_argument(
+        "--lr", type=float, default=1e-3, help="Learning rate for FNO/DeepONet/PINN."
+    )
     parser.add_argument(
         "--scheduler-step",
         type=int,
