@@ -99,7 +99,7 @@ def test_fno2d_runs_on_mps():
 
 @pytest.mark.skipif(not DARCY_FILE.exists(), reason="Darcy sample not downloaded")
 def test_fno2d_on_real_darcy_batch():
-    ds = DarcyFlowDataset(DARCY_FILE, train=True, train_split=0.9)
+    ds = DarcyFlowDataset(DARCY_FILE, split="train")
     field, target, grid = ds[0]  # field/target: (1, 128, 128), grid: (128, 128, 2)
     x = torch.cat([field.permute(1, 2, 0), grid], dim=-1).unsqueeze(
         0
@@ -114,7 +114,7 @@ def test_fno2d_on_real_darcy_batch():
 
 @pytest.mark.skipif(not BURGERS_FILE.exists(), reason="Burgers sample not downloaded")
 def test_fno1d_on_real_burgers_batch():
-    ds = Burgers1DDataset(BURGERS_FILE, initial_step=10, train=True, train_split=0.9)
+    ds = Burgers1DDataset(BURGERS_FILE, initial_step=10, split="train")
     window, _full_trajectory, grid = ds[0]  # window: (10, 1024), grid: (1024, 1)
     x = torch.cat([window.permute(1, 0), grid], dim=-1).unsqueeze(0)  # (1, 1024, 11)
 

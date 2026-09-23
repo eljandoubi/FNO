@@ -165,7 +165,7 @@ def test_fit_skips_wandb_when_disabled(monkeypatch):
 
 @pytest.mark.skipif(not DARCY_FILE.exists(), reason="Darcy sample not downloaded")
 def test_fit_on_small_real_darcy_subset():
-    ds = DarcyFlowDataset(DARCY_FILE, train=True, train_split=0.9)
+    ds = DarcyFlowDataset(DARCY_FILE, split="train")
     # Mechanics check only -- not a real train/val split or accuracy benchmark.
     train_loader = DataLoader(
         Subset(ds, range(16)), batch_size=4, collate_fn=darcy_collate
@@ -186,7 +186,7 @@ def test_fit_on_small_real_darcy_subset():
 
 @pytest.mark.skipif(not BURGERS_FILE.exists(), reason="Burgers sample not downloaded")
 def test_fit_on_small_real_burgers_subset():
-    ds = Burgers1DDataset(BURGERS_FILE, initial_step=10, train=True, train_split=0.9)
+    ds = Burgers1DDataset(BURGERS_FILE, initial_step=10, split="train")
     # Mechanics check only -- not a real train/val split or accuracy benchmark.
     train_loader = DataLoader(
         Subset(ds, range(16)), batch_size=4, collate_fn=burgers_collate
@@ -205,13 +205,14 @@ def test_fit_on_small_real_burgers_subset():
 
 @pytest.mark.skipif(not NS_FILE.exists(), reason="NS_incom shard not downloaded")
 def test_fit_on_small_real_navier_stokes_subset():
-    # Only 4 trajectories per shard -- use the dataset's own tiny train/test split.
+    # Only 4 trajectories per shard -- fractions chosen so train/val are both non-empty.
     # spatial_stride=8 (512 -> 64) keeps this fast without loading full-res arrays.
+    fractions = (0.5, 0.25, 0.25)
     train_ds = NavierStokes2DDataset(
-        NS_FILE, initial_step=5, train=True, train_split=0.75, spatial_stride=8
+        NS_FILE, initial_step=5, split="train", split_fractions=fractions, spatial_stride=8
     )
     val_ds = NavierStokes2DDataset(
-        NS_FILE, initial_step=5, train=False, train_split=0.75, spatial_stride=8
+        NS_FILE, initial_step=5, split="val", split_fractions=fractions, spatial_stride=8
     )
 
     train_loader = DataLoader(train_ds, batch_size=1, collate_fn=navier_stokes_collate)

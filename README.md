@@ -59,9 +59,11 @@ uv run fno-inspect-h5 data/raw/pdebench-navierstokes2d/ns_incom_inhom_2d_512-0.h
 ```python
 from fno.data.pdebench import DarcyFlowDataset
 
-ds = DarcyFlowDataset("data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5", train=True)
+ds = DarcyFlowDataset("data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5", split="train")
 input_field, target_field, grid = ds[0]
 ```
+
+All three accept `split="train"|"val"|"test"` and `split_fractions=(train, val, test)` (default `(0.8, 0.1, 0.1)`) -- validation is kept separate from the held-out test set specifically so hyperparameter tuning never touches test data.
 
 ## Development
 
