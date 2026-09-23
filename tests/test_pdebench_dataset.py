@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import pytest
 
-from fno.data.pdebench import Burgers1DDataset, DarcyFlowDataset
+from fno.data.pdebench import Burgers1DDataset, DarcyFlowDataset, NavierStokes2DDataset
 
 
 def _write_darcy_h5(path, n=10, nx=8, ny=8):
@@ -92,3 +92,48 @@ def test_burgers_missing_key_raises(tmp_path):
         f["x-coordinate"] = np.zeros(4, dtype=np.float32)
     with pytest.raises(KeyError):
         Burgers1DDataset(path)
+
+
+def _write_ns_incom_h5(path, n=4, t=6, h=8, w=8):
+    with h5py.File(path, "w") as f:
+        f["velocity"] = np.random.rand(n, t, h, w, 2).astype(np.float32)
+        f["particles"] = np.random.rand(n, t, h, w, 1).astype(np.float32)
+        f["force"] = np.random.rand(n, h, w, 2).astype(np.float32)
+        f["t"] = np.tile(np.arange(t, dtype=np.float32), (n, 1))
+
+
+def test_navier_stokes_dataset_shapes(tmp_path):
+    path = tmp_path / "shard0.h5"
+    _write_ns_incom_h5(path, n=4, t=6, h=8, w=8)
+    ds = NavierStokes2DDataset(path, initial_step=2, train=True, train_split=1.0)
+    assert len(ds) == 4
+    inp, target, grid = ds[0]
+    assert inp.shape == (2, 2, 8, 8)
+    assert target.shape == (6, 2, 8, 8)
+    assert grid.shape == (8, 8, 2)
+
+
+def test_navier_stokes_dataset_concatenates_multiple_shards(tmp_path):
+    path0 = tmp_path / "shard0.h5"
+    path1 = tmp_path / "shard1.h5"
+    _write_ns_incom_h5(path0, n=4)
+    _write_ns_incom_h5(path1, n=4)
+    ds = NavierStokes2DDataset([path0, path1], train=True, train_split=1.0)
+    assert len(ds) == 8
+
+
+def test_navier_stokes_dataset_train_test_split_sizes(tmp_path):
+    path = tmp_path / "shard0.h5"
+    _write_ns_incom_h5(path, n=4)
+    train_ds = NavierStokes2DDataset(path, train=True, train_split=0.75)
+    test_ds = NavierStokes2DDataset(path, train=False, train_split=0.75)
+    assert len(train_ds) == 3
+    assert len(test_ds) == 1
+
+
+def test_navier_stokes_missing_key_raises(tmp_path):
+    path = tmp_path / "bad.h5"
+    with h5py.File(path, "w") as f:
+        f["t"] = np.zeros((4, 6), dtype=np.float32)
+    with pytest.raises(KeyError):
+        NavierStokes2DDataset(path)

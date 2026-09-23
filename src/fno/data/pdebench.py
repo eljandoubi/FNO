@@ -1,9 +1,10 @@
-"""PyTorch datasets for PDEBench HDF5 files (Burgers 1D, Darcy Flow 2D).
+"""PyTorch datasets for PDEBench HDF5 files (Burgers 1D, Darcy Flow 2D, NS_Incom 2D).
 
 Schema reference: pdebench/models/fno/utils.py in github.com/pdebench/PDEBench.
-Not yet validated against a real downloaded file -- run against one before
-trusting shapes blindly (NS_Incom shards are not covered here; their internal
-layout differs and hasn't been confirmed).
+Burgers/Darcy are built from that documented schema but not yet validated against
+a real downloaded file. NavierStokes2DDataset's schema *is* confirmed against a
+real downloaded shard via `fno-inspect-h5` (keys: velocity, particles, force, t --
+no grouped-by-sample layout, no x/y-coordinate keys).
 """
 
 from __future__ import annotations
@@ -108,3 +109,69 @@ class Burgers1DDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         sample = self.data[idx]  # (T, X)
         return sample[: self.initial_step], sample, self.grid
+
+
+class NavierStokes2DDataset(Dataset):
+    """2D incompressible Navier-Stokes: initial velocity frames -> full trajectory.
+
+    Expects one or more PDEBench NS_Incom-style HDF5 files ('velocity' (N, T, H, W, 2),
+    'particles' (N, T, H, W, 1), 'force' (N, H, W, 2), 't' (N, T)). Each shard file
+    only holds a handful of trajectories (N=4 as downloaded), so multiple shard
+    paths can be passed and are concatenated along the sample axis. There is no
+    x/y-coordinate key in the file; the grid is assumed to be the unit square.
+    """
+
+    def __init__(
+        self,
+        file_paths: str | Path | list[str | Path],
+        initial_step: int = 10,
+        train: bool = True,
+        train_split: float = 0.75,
+    ) -> None:
+        if isinstance(file_paths, (str, Path)):
+            file_paths = [file_paths]
+        self.file_paths = [Path(p) for p in file_paths]
+        self.initial_step = initial_step
+
+        velocities, particles_list, forces, times = [], [], [], []
+        for path in self.file_paths:
+            with h5py.File(path, "r") as f:
+                _require_keys(
+                    set(f.keys()), {"velocity", "particles", "force", "t"}, path
+                )
+                velocities.append(np.asarray(f["velocity"], dtype=np.float32))
+                particles_list.append(np.asarray(f["particles"], dtype=np.float32))
+                forces.append(np.asarray(f["force"], dtype=np.float32))
+                times.append(np.asarray(f["t"], dtype=np.float32))
+
+        velocity = np.concatenate(velocities, axis=0)  # (N, T, H, W, 2)
+        particles = np.concatenate(particles_list, axis=0)  # (N, T, H, W, 1)
+        force = np.concatenate(forces, axis=0)  # (N, H, W, 2)
+        t = np.concatenate(times, axis=0)  # (N, T)
+
+        # channel-first: (N, T, C, H, W) / (N, C, H, W)
+        velocity = np.moveaxis(velocity, -1, 2)
+        particles = np.moveaxis(particles, -1, 2)
+        force = np.moveaxis(force, -1, 1)
+
+        n_samples = velocity.shape[0]
+        split = round(n_samples * train_split)
+        sel = slice(0, split) if train else slice(split, n_samples)
+
+        self.velocity = torch.from_numpy(velocity[sel])  # (N, T, 2, H, W)
+        self.particles = torch.from_numpy(particles[sel])  # (N, T, 1, H, W)
+        self.force = torch.from_numpy(force[sel])  # (N, 2, H, W)
+        self.t = torch.from_numpy(t[sel])  # (N, T)
+
+        height, width = velocity.shape[-2], velocity.shape[-1]
+        grid_x, grid_y = torch.meshgrid(
+            torch.linspace(0, 1, height), torch.linspace(0, 1, width), indexing="ij"
+        )
+        self.grid = torch.stack((grid_x, grid_y), dim=-1)  # (H, W, 2)
+
+    def __len__(self) -> int:
+        return self.velocity.shape[0]
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        trajectory = self.velocity[idx]  # (T, 2, H, W)
+        return trajectory[: self.initial_step], trajectory, self.grid
