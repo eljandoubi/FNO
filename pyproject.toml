@@ -14,11 +14,15 @@ dependencies = [
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "pyyaml>=6.0.3",
+    "requests>=2.34.2",
     "scipy>=1.18.1",
     "torch>=2.14.0",
     "tqdm>=4.70.1",
     "wandb>=0.30.0",
 ]
+
+[project.scripts]
+fno-download = "fno.data.download:main"
 
 [build-system]
 requires = ["uv_build>=0.12.16,<0.13.0"]

@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Downloaded/generated datasets (see src/fno/data/download.py)
+/data/
