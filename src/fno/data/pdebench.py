@@ -25,6 +25,31 @@ def _require_keys(h5_keys: set[str], required: set[str], file_path: Path) -> Non
         )
 
 
+def _split_slice(
+    n_samples: int,
+    split: str,
+    split_fractions: tuple[float, float, float] = (0.8, 0.1, 0.1),
+) -> slice:
+    """Index slice for 'train'/'val'/'test' out of `n_samples`, given
+    (train_frac, val_frac, test_frac). `test` gets whatever remains after
+    train+val, so the three fractions don't need to sum to exactly 1.
+    """
+    train_frac, val_frac, _test_frac = split_fractions
+    if train_frac + val_frac > 1.0 + 1e-9:
+        raise ValueError(
+            f"train_frac + val_frac must be <= 1.0, got {train_frac + val_frac}"
+        )
+    train_end = round(n_samples * train_frac)
+    val_end = train_end + round(n_samples * val_frac)
+    if split == "train":
+        return slice(0, train_end)
+    if split == "val":
+        return slice(train_end, val_end)
+    if split == "test":
+        return slice(val_end, n_samples)
+    raise ValueError(f"split must be 'train', 'val', or 'test', got {split!r}")
+
+
 class DarcyFlowDataset(Dataset):
     """2D Darcy Flow: permeability field -> steady-state pressure field.
 
@@ -35,8 +60,8 @@ class DarcyFlowDataset(Dataset):
     def __init__(
         self,
         file_path: str | Path,
-        train: bool = True,
-        train_split: float = 0.9,
+        split: str = "train",
+        split_fractions: tuple[float, float, float] = (0.8, 0.1, 0.1),
     ) -> None:
         self.file_path = Path(file_path)
         with h5py.File(self.file_path, "r") as f:
@@ -57,8 +82,7 @@ class DarcyFlowDataset(Dataset):
             tensor = tensor[:, 0]
 
         n_samples = nu.shape[0]
-        split = int(n_samples * train_split)
-        sel = slice(0, split) if train else slice(split, n_samples)
+        sel = _split_slice(n_samples, split, split_fractions)
 
         self.input = torch.from_numpy(nu[sel]).unsqueeze(1)  # (N, 1, nx, ny)
         self.target = torch.from_numpy(tensor[sel]).unsqueeze(1)  # (N, 1, nx, ny)
@@ -85,8 +109,8 @@ class Burgers1DDataset(Dataset):
         self,
         file_path: str | Path,
         initial_step: int = 10,
-        train: bool = True,
-        train_split: float = 0.9,
+        split: str = "train",
+        split_fractions: tuple[float, float, float] = (0.8, 0.1, 0.1),
     ) -> None:
         self.file_path = Path(file_path)
         self.initial_step = initial_step
@@ -96,8 +120,7 @@ class Burgers1DDataset(Dataset):
             x = np.asarray(f["x-coordinate"], dtype=np.float32)
 
         n_samples = tensor.shape[0]
-        split = int(n_samples * train_split)
-        sel = slice(0, split) if train else slice(split, n_samples)
+        sel = _split_slice(n_samples, split, split_fractions)
 
         self.data = torch.from_numpy(tensor[sel])  # (N, T, X)
         self.grid = torch.from_numpy(x).unsqueeze(-1)  # (X, 1)
@@ -121,14 +144,18 @@ class NavierStokes2DDataset(Dataset):
 
     `spatial_stride` subsamples H/W at read time (e.g. 8 -> 512 becomes 64),
     which avoids loading the full-resolution arrays (~8GB+ per shard) into memory.
+
+    Each shard only has 4 trajectories, so a train/val/test split on a single
+    shard is extremely tight (may round to 0 for a split) -- pass several
+    shard paths or adjust `split_fractions` accordingly.
     """
 
     def __init__(
         self,
         file_paths: str | Path | list[str | Path],
         initial_step: int = 10,
-        train: bool = True,
-        train_split: float = 0.75,
+        split: str = "train",
+        split_fractions: tuple[float, float, float] = (0.8, 0.1, 0.1),
         spatial_stride: int = 1,
     ) -> None:
         if isinstance(file_paths, (str, Path)):
@@ -168,8 +195,7 @@ class NavierStokes2DDataset(Dataset):
         force = np.moveaxis(force, -1, 1)
 
         n_samples = velocity.shape[0]
-        split = round(n_samples * train_split)
-        sel = slice(0, split) if train else slice(split, n_samples)
+        sel = _split_slice(n_samples, split, split_fractions)
 
         self.velocity = torch.from_numpy(velocity[sel])  # (N, T, 2, H, W)
         self.particles = torch.from_numpy(particles[sel])  # (N, T, 1, H, W)
