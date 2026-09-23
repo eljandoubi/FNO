@@ -91,14 +91,20 @@ class _DeepONetSuperresView(Dataset):
     def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor]:
         field, target, grid = self.base[idx]
         low_res_field = field[:, :: self.stride, :: self.stride]
-        return low_res_field, target, grid  # target/grid stay at native (high) resolution
+        return (
+            low_res_field,
+            target,
+            grid,
+        )  # target/grid stay at native (high) resolution
 
 
 def _deeponet_superres_collate(
     batch: list[tuple[Tensor, Tensor, Tensor]],
 ) -> tuple[Tensor, Tensor, Tensor]:
     fields, targets, grids = zip(*batch, strict=True)
-    fields = torch.stack(fields)  # (B, 1, h_low, w_low) -- matches the branch's fixed input size
+    fields = torch.stack(
+        fields
+    )  # (B, 1, h_low, w_low) -- matches the branch's fixed input size
     branch_input = fields.reshape(fields.shape[0], -1)
     trunk_input = grids[0].reshape(-1, 2)  # high-res query grid
     targets = torch.stack(targets).permute(0, 2, 3, 1).reshape(fields.shape[0], -1, 1)
@@ -224,29 +230,46 @@ def run_darcy_benchmark(
 
     low_res_train = Subset(_DownsampledDarcyView(full_train, stride=2), range(n_train))
     low_res_test = Subset(_DownsampledDarcyView(full_test, stride=2), range(n_test))
-    full_res_test = Subset(full_test, range(n_test))  # native 128x128, for the superres check
+    full_res_test = Subset(
+        full_test, range(n_test)
+    )  # native 128x128, for the superres check
 
     config = trainer.TrainConfig(epochs=epochs, device=device, use_wandb=False)
 
     results = []
 
-    fno_train_loader = DataLoader(low_res_train, batch_size=32, collate_fn=darcy_collate, shuffle=True)
+    fno_train_loader = DataLoader(
+        low_res_train, batch_size=32, collate_fn=darcy_collate, shuffle=True
+    )
     fno_test_loader = DataLoader(low_res_test, batch_size=32, collate_fn=darcy_collate)
-    fno_superres_loader = DataLoader(full_res_test, batch_size=32, collate_fn=darcy_collate)
-    fno_model = FNO2d(modes1=12, modes2=12, width=32, in_channels=3, out_channels=1, n_layers=4)
+    fno_superres_loader = DataLoader(
+        full_res_test, batch_size=32, collate_fn=darcy_collate
+    )
+    fno_model = FNO2d(
+        modes1=12, modes2=12, width=32, in_channels=3, out_channels=1, n_layers=4
+    )
     results.append(
         benchmark_operator(
-            "FNO2d", fno_model, fno_train_loader, fno_test_loader, config, fno_superres_loader
+            "FNO2d",
+            fno_model,
+            fno_train_loader,
+            fno_test_loader,
+            config,
+            fno_superres_loader,
         )
     )
 
     deeponet_train_loader = DataLoader(
         low_res_train, batch_size=32, collate_fn=darcy_deeponet_collate, shuffle=True
     )
-    deeponet_test_loader = DataLoader(low_res_test, batch_size=32, collate_fn=darcy_deeponet_collate)
+    deeponet_test_loader = DataLoader(
+        low_res_test, batch_size=32, collate_fn=darcy_deeponet_collate
+    )
     # Branch input must stay at the trained (low-res) sensor count; only the
     # trunk's query grid goes to high-res -- see _DeepONetSuperresView.
-    deeponet_superres_data = Subset(_DeepONetSuperresView(full_test, stride=2), range(n_test))
+    deeponet_superres_data = Subset(
+        _DeepONetSuperresView(full_test, stride=2), range(n_test)
+    )
     deeponet_superres_loader = DataLoader(
         deeponet_superres_data, batch_size=32, collate_fn=_deeponet_superres_collate
     )
@@ -269,7 +292,9 @@ def run_darcy_benchmark(
         )
     )
 
-    pinn_field, pinn_target, pinn_grid = full_test[0]  # same held-out instance as the superres check
+    pinn_field, pinn_target, pinn_grid = full_test[
+        0
+    ]  # same held-out instance as the superres check
     results.append(
         benchmark_pinn_darcy(
             "PINN (single-instance fit)",
@@ -296,7 +321,9 @@ def format_summary(results: list[BenchmarkResult]) -> str:
     )
     lines = [header, "-" * len(header)]
     for r in results:
-        superres = f"{r.superres_l2_error:.4f}" if r.superres_l2_error is not None else "n/a"
+        superres = (
+            f"{r.superres_l2_error:.4f}" if r.superres_l2_error is not None else "n/a"
+        )
         lines.append(
             f"{r.name:<28}{r.n_parameters:>10,}{r.train_time_s:>12.2f}"
             f"{r.inference_latency_ms:>12.2f}{r.test_l2_error:>10.4f}{superres:>14}"
@@ -322,13 +349,19 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--n-train", type=int, default=512)
     parser.add_argument("--n-test", type=int, default=64)
-    parser.add_argument("--epochs", type=int, default=20, help="Epochs for FNO/DeepONet.")
+    parser.add_argument(
+        "--epochs", type=int, default=20, help="Epochs for FNO/DeepONet."
+    )
     parser.add_argument("--pinn-epochs", type=int, default=500)
-    parser.add_argument("--device", default=None, help="Defaults to auto-detected (cuda/mps/cpu).")
+    parser.add_argument(
+        "--device", default=None, help="Defaults to auto-detected (cuda/mps/cpu)."
+    )
     args = parser.parse_args(argv)
 
     if not args.file.exists():
-        raise SystemExit(f"{args.file} not found -- run: uv run fno-download pdebench-darcy2d")
+        raise SystemExit(
+            f"{args.file} not found -- run: uv run fno-download pdebench-darcy2d"
+        )
 
     results = run_darcy_benchmark(
         args.file,
