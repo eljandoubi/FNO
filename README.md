@@ -1,6 +1,6 @@
 # FNO
 
-<p align="center"><em>Fourier Neural Operator, DeepONet, and PINN -- implemented, tested, and benchmarked head-to-head on the same PDE data.</em></p>
+<p align="center"><em>Fourier Neural Operator, DeepONet, and PINN: implemented, tested, and benchmarked head-to-head on the same PDE data.</em></p>
 
 <p align="center">
   <a href="https://github.com/eljandoubi/FNO/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/eljandoubi/FNO/actions/workflows/ci.yml/badge.svg"></a>
@@ -25,16 +25,16 @@
 
 ## Executive Summary
 
-This repository implements and rigorously compares three operator-learning / PDE-solving architectures in PyTorch -- **Fourier Neural Operator (FNO)**, **DeepONet**, and **Physics-Informed Neural Networks (PINN)** -- on three benchmark PDEs from [PDEBench](https://github.com/pdebench/PDEBench): **Darcy Flow (2D)**, **Burgers' equation (1D)**, and **incompressible Navier-Stokes (2D)**.
+This repository implements and rigorously compares three operator-learning / PDE-solving architectures in PyTorch: **Fourier Neural Operator (FNO)**, **DeepONet**, and **Physics-Informed Neural Networks (PINN)**, on three benchmark PDEs from [PDEBench](https://github.com/pdebench/PDEBench): **Darcy Flow (2D)**, **Burgers' equation (1D)**, and **incompressible Navier-Stokes (2D)**.
 
 Built as a Scientific Machine Learning benchmark (MVA / ENSTA Paris), the emphasis throughout is on **honest, verified results**: every model/equation combination is backed by a test against real downloaded data, super-resolution claims are checked against native high-resolution ground truth rather than synthetic upsampling, and PINN's fundamentally different (non-operator) setup is explicitly flagged everywhere it's compared to FNO/DeepONet instead of being silently averaged in.
 
 ### Highlights
 
-- **Full 3x3 coverage** -- FNO, DeepONet, and PINN are all implemented and tested against all three equations (see the [coverage table](#models)).
-- **Genuine zero-shot super-resolution** -- operators train at low resolution and are evaluated directly against PDEBench's native high-resolution ground truth, never synthetic/interpolated data.
-- **One command, fully resumable** -- `fno-pipeline` runs download -> train -> evaluate -> benchmark -> plot end to end, and safely resumes after any interruption (see [Pipeline](#pipeline)).
-- **Modern tooling** -- managed by [`uv`](https://github.com/astral-sh/uv) for fast, reproducible installs.
+- **Full 3x3 coverage**: FNO, DeepONet, and PINN are all implemented and tested against all three equations (see the [coverage table](#models)).
+- **Genuine zero-shot super-resolution**: operators train at low resolution and are evaluated directly against PDEBench's native high-resolution ground truth, never synthetic/interpolated data.
+- **One command, fully resumable**: `fno-pipeline` runs download -> train -> evaluate -> benchmark -> plot end to end, and safely resumes after any interruption (see [Pipeline](#pipeline)).
+- **Modern tooling**: managed by [`uv`](https://github.com/astral-sh/uv) for fast, reproducible installs.
 
 ## Getting Started
 
@@ -66,7 +66,7 @@ tests/             one test file per module; real-data smoke tests where relevan
 
 ## Data
 
-Benchmark datasets are fetched on demand via the `fno-download` CLI -- nothing downloads automatically, and everything it creates lives under a single `--data-root` folder (default `data/`) so it can be wiped with one `rm -rf`.
+Benchmark datasets are fetched on demand via the `fno-download` CLI. Nothing downloads automatically, and everything it creates lives under a single `--data-root` folder (default `data/`) so it can be wiped with one `rm -rf`.
 
 ```bash
 uv run fno-download --list                                   # available datasets and variants
@@ -84,7 +84,7 @@ uv run fno-download airfrans                                  # 2D airfoil RANS 
 | `pdebench-navierstokes2d` | PDEBench | ~275 shards, fetched on demand from DaRUS's API and cached (`--variant shard0` ... `shard274`) |
 | `airfrans` | [AirfRANS](https://github.com/Extrality/AirfRANS) | irregular-geometry airfoil CFD, single archive |
 
-Files are checksum-verified (MD5) against PDEBench's published hashes where available. Use `--variant` (repeatable) or `--all-variants` to pick which files to pull, and `--force` to re-download. `--variant` also accepts comma-separated lists and, for Navier-Stokes, `shard<A>-shard<B>` ranges (e.g. `--variant shard0-shard9,shard50`) -- the full shard index is queried once from DaRUS's Dataverse API and cached under `<data-root>/.cache`, rather than hand-listing hundreds of file IDs.
+Files are checksum-verified (MD5) against PDEBench's published hashes where available. Use `--variant` (repeatable) or `--all-variants` to pick which files to pull, and `--force` to re-download. `--variant` also accepts comma-separated lists and, for Navier-Stokes, `shard<A>-shard<B>` ranges (e.g. `--variant shard0-shard9,shard50`); the full shard index is queried once from DaRUS's Dataverse API and cached under `<data-root>/.cache`, rather than hand-listing hundreds of file IDs.
 
 
 Before writing a loader for a new/unverified file format, inspect its real structure:
@@ -97,9 +97,9 @@ uv run fno-inspect-h5 data/raw/pdebench-navierstokes2d/ns_incom_inhom_2d_512-0.h
 
 `src/fno/data/pdebench.py` provides PyTorch `Dataset` classes for the three target equations, each validated against real downloaded files (schema confirmed via `fno-inspect-h5`, not just assumed from docs):
 
-- `DarcyFlowDataset` -- permeability field (`nu`) -> steady-state pressure field (`tensor`)
-- `Burgers1DDataset` -- initial timesteps -> full spatio-temporal trajectory
-- `NavierStokes2DDataset` -- initial velocity frames -> full trajectory; accepts multiple shard paths (each shard only holds 4 trajectories) and concatenates them
+- `DarcyFlowDataset`: permeability field (`nu`) -> steady-state pressure field (`tensor`)
+- `Burgers1DDataset`: initial timesteps -> full spatio-temporal trajectory
+- `NavierStokes2DDataset`: initial velocity frames -> full trajectory; accepts multiple shard paths (each shard only holds 4 trajectories) and concatenates them
 
 ```python
 from fno.data.pdebench import DarcyFlowDataset
@@ -108,15 +108,15 @@ ds = DarcyFlowDataset("data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5
 input_field, target_field, grid = ds[0]
 ```
 
-All three accept `split="train"|"val"|"test"` and `split_fractions=(train, val, test)` (default `(0.8, 0.1, 0.1)`) -- validation is kept separate from the held-out test set specifically so hyperparameter tuning never touches test data.
+All three accept `split="train"|"val"|"test"` and `split_fractions=(train, val, test)` (default `(0.8, 0.1, 0.1)`); validation is kept separate from the held-out test set specifically so hyperparameter tuning never touches test data.
 
 ## Models
 
 Three operator-learning/PDE-solving architectures are implemented, mirroring the README's benchmark scope:
 
-- **`fno.models.fno`** (`FNO1d`/`FNO2d`) -- spectral convolutions truncated to a fixed number of Fourier modes, independent of spatial resolution (zero-shot super-resolution). Trained via `fno.training.trainer.fit()` with the `*_collate` adapters in `fno.training.collate`.
-- **`fno.models.deeponet`** (`DeepONet`) -- branch net encodes the input function at fixed sensors, trunk net encodes query coordinates, output is their dot product. The trunk can be queried at arbitrary/new points without retraining, but the branch's input size (sensor sampling) is fixed at construction. Trained the same way via `fit()`, using the `*_deeponet_collate` adapters.
-- **`fno.models.pinn`** (`PINN`) + **`fno.training.pinn`** -- a coordinate-to-solution MLP trained by minimizing the PDE residual (via autograd) plus initial/boundary data terms. Unlike FNO/DeepONet, a PINN is **not an operator**: it solves one fixed PDE instance (one viscosity, one coefficient field) and must be retrained for every new instance.
+- **`fno.models.fno`** (`FNO1d`/`FNO2d`): spectral convolutions truncated to a fixed number of Fourier modes, independent of spatial resolution (zero-shot super-resolution). Trained via `fno.training.trainer.fit()` with the `*_collate` adapters in `fno.training.collate`.
+- **`fno.models.deeponet`** (`DeepONet`): branch net encodes the input function at fixed sensors, trunk net encodes query coordinates, output is their dot product. The trunk can be queried at arbitrary/new points without retraining, but the branch's input size (sensor sampling) is fixed at construction. Trained the same way via `fit()`, using the `*_deeponet_collate` adapters.
+- **`fno.models.pinn`** (`PINN`) + **`fno.training.pinn`**: a coordinate-to-solution MLP trained by minimizing the PDE residual (via autograd) plus initial/boundary data terms. Unlike FNO/DeepONet, a PINN is **not an operator**: it solves one fixed PDE instance (one viscosity, one coefficient field) and must be retrained for every new instance.
 
 ### Coverage
 
@@ -130,8 +130,8 @@ Every cell below is backed by a test that runs against real downloaded data (not
 
 **PINN residuals get progressively more involved across the three equations:**
 - **Burgers'** (`u_t + u*u_x - nu*u_xx = 0`): the standard closed-form case.
-- **Darcy Flow** (`-div(a*grad(u)) = f`): `a(x,y)` is a discretized per-sample field, not closed-form, so `fno.training.pinn._interpolate_field` bilinearly interpolates it via `torch.nn.functional.grid_sample` -- kept differentiable end-to-end so `a`'s own spatial derivatives can be autograd'd too. Verified against a manufactured solution (`a=1`, `u=x^2+y^2`, exact residual `=0`).
-- **Navier-Stokes** (momentum + continuity, with external forcing): uses the classic stream-function formulation `u=psi_y`, `v=-psi_x`, which satisfies incompressibility automatically by construction (no ground-truth pressure data needed -- the network jointly predicts `(psi, p)`). Verified two ways: continuity holds for an arbitrary untrained network, and momentum residuals are zero for a manufactured `(psi, p)` solution with matching forcing.
+- **Darcy Flow** (`-div(a*grad(u)) = f`): `a(x,y)` is a discretized per-sample field, not closed-form, so `fno.training.pinn._interpolate_field` bilinearly interpolates it via `torch.nn.functional.grid_sample`, kept differentiable end-to-end so `a`'s own spatial derivatives can be autograd'd too. Verified against a manufactured solution (`a=1`, `u=x^2+y^2`, exact residual `=0`).
+- **Navier-Stokes** (momentum + continuity, with external forcing): uses the classic stream-function formulation `u=psi_y`, `v=-psi_x`, which satisfies incompressibility automatically by construction (no ground-truth pressure data needed: the network jointly predicts `(psi, p)`). Verified two ways: continuity holds for an arbitrary untrained network, and momentum residuals are zero for a manufactured `(psi, p)` solution with matching forcing.
 
 ```python
 from fno.models.pinn import PINN
@@ -173,9 +173,9 @@ PINN (single-instance fit)      16,897        6.54       41.12    0.9968        
 
 ![Example FNO vs DeepONet vs PINN comparison plot on Darcy Flow, generated by fno-pipeline from the numbers above](docs/assets/darcy_benchmark_example.png)
 
-*(Example output at the small defaults above -- few epochs, not tuned for accuracy. Increase `--epochs`/`--n-train` for meaningful numbers; the point of the default is to run fast. The plot is real output from `fno.benchmarks.plots.plot_benchmark_summary`, rendered from these exact numbers.)*
+*(Example output at the small defaults above: few epochs, not tuned for accuracy. Increase `--epochs`/`--n-train` for meaningful numbers; the point of the default is to run fast. The plot is real output from `fno.benchmarks.plots.plot_benchmark_summary`, rendered from these exact numbers.)*
 
-**The super-resolution check is real, not approximated**: for Darcy/Burgers, FNO/DeepONet train on fields **downsampled 2x/4x**, then get evaluated directly against PDEBench's **native-resolution** ground truth -- no synthetic high-res data needed, since the dataset already has it. Navier-Stokes uses two separately-strided readouts of the same shard(s) instead (`--low-res-stride`/`--high-res-stride` inside `run_navier_stokes_benchmark`). This also surfaces a genuine architectural difference: FNO is resolution-independent on both input and output, but DeepONet's branch net has a fixed sensor count from training, so its super-resolution check keeps the branch input at low-res while only the trunk's query grid goes high-res (see `_DeepONetSuperresView` / `_DeepONetSuperres1DView` / `_DeepONetNSSuperresView` in `fno/benchmarks/harness.py`).
+**The super-resolution check is real, not approximated**: for Darcy/Burgers, FNO/DeepONet train on fields **downsampled 2x/4x**, then get evaluated directly against PDEBench's **native-resolution** ground truth; no synthetic high-res data needed, since the dataset already has it. Navier-Stokes uses two separately-strided readouts of the same shard(s) instead (`--low-res-stride`/`--high-res-stride` inside `run_navier_stokes_benchmark`). This also surfaces a genuine architectural difference: FNO is resolution-independent on both input and output, but DeepONet's branch net has a fixed sensor count from training, so its super-resolution check keeps the branch input at low-res while only the trunk's query grid goes high-res (see `_DeepONetSuperresView` / `_DeepONetSuperres1DView` / `_DeepONetNSSuperresView` in `fno/benchmarks/harness.py`).
 
 PINN's row isn't a fair comparison to the two operators above it and is labeled as such: it fits one specific instance via its own physics residual rather than learning from many training samples, so "training cost" and "generalization error" mean different things for it. For Burgers/Navier-Stokes, its held-out check is an actual extrapolation test (predict the final timestep from the initial condition/forcing alone), not just IC memorization.
 
@@ -187,7 +187,7 @@ The demo defaults above prioritize a fast run, not accuracy. `fno-benchmark`/`fn
 
 | Flag | Demo default | Notes |
 | --- | --- | --- |
-| `--n-train` / `--n-test` | 512 / 64 | Darcy/Burgers have 8,000/1,000 samples available per the default split -- use most of it for real numbers |
+| `--n-train` / `--n-test` | 512 / 64 | Darcy/Burgers have 8,000/1,000 samples available per the default split; use most of it for real numbers |
 | `--epochs` | 20 | PDEBench's own FNO configs use 500 |
 | `--pinn-epochs` | 500 | PDEBench's own PINN checkpoints used ~15,000 iterations |
 | `--lr` | `1e-3` | applied to FNO, DeepONet, and PINN |
@@ -205,7 +205,7 @@ Navier-Stokes needs more *data*, not just more epochs, to get meaningful numbers
 
 ## Hyperparameter Search
 
-`fno-search` searches FNO/DeepONet hyperparameters (`lr`, `fno_width`, `deeponet_hidden_dim`, ...) on a **small data subset** with **few epochs** (fast), then reports the winner -- so you don't have to guess before spending real compute on a full-data run:
+`fno-search` searches FNO/DeepONet hyperparameters (`lr`, `fno_width`, `deeponet_hidden_dim`, ...) on a **small data subset** with **few epochs** (fast), then reports the winner, so you don't have to guess before spending real compute on a full-data run:
 
 ```bash
 uv run fno-search darcy --file data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5 \
@@ -214,8 +214,8 @@ uv run fno-search darcy --file data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Tr
   --results-file runs/search/darcy.json
 ```
 
-Two dependency-free strategies (`--strategy`), not a general HPO framework -- ranking is always by combined FNO + DeepONet test $L^2$ error on the subset:
-- **`grid`** (default): exhaustive Cartesian product over whichever knobs you pass candidates for. Simple and complete, but combinatorial -- 3 candidates on 3 knobs is already 27 trials.
+Two dependency-free strategies (`--strategy`), not a general HPO framework. Ranking is always by combined FNO + DeepONet test $L^2$ error on the subset:
+- **`grid`** (default): exhaustive Cartesian product over whichever knobs you pass candidates for. Simple and complete, but combinatorial: 3 candidates on 3 knobs is already 27 trials.
 - **`random`**: samples up to `--n-trials` unique combinations at random (`--seed` for reproducibility). Usually more efficient than grid search for the same budget once more than a couple of knobs have multiple candidates ([Bergstra & Bengio, 2012](https://www.jmlr.org/papers/v13/bergstra12a.html)), and its cost doesn't explode as candidates grow:
   ```bash
   uv run fno-search darcy --file data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5 \
@@ -225,7 +225,7 @@ Two dependency-free strategies (`--strategy`), not a general HPO framework -- ra
 
 PINN is always skipped during search (it fits one instance, not an operator, so it doesn't share these hyperparameters meaningfully, and it's cheap enough to just run once at full scale).
 
-**The "search on a subset, then train on the full data" workflow is automated end to end via `fno-pipeline --search`** -- see [Pipeline](#pipeline) below: it runs the search first, saves the winner, and feeds it straight into the full-data benchmark step.
+**The "search on a subset, then train on the full data" workflow is automated end to end via `fno-pipeline --search`.** See [Pipeline](#pipeline) below: it runs the search first, saves the winner, and feeds it straight into the full-data benchmark step.
 
 ## Pipeline
 
@@ -250,7 +250,7 @@ flowchart LR
     C --> D["report.md +<br/>cross-equation plot"]
 ```
 
-This downloads (if missing) each equation's default dataset variant, optionally searches hyperparameters on a subset, benchmarks FNO/DeepONet/PINN on the full data (using the search winner if search ran), saves results as JSON, and renders a PNG comparison plot -- writing everything under `--run-dir`:
+This downloads (if missing) each equation's default dataset variant, optionally searches hyperparameters on a subset, benchmarks FNO/DeepONet/PINN on the full data (using the search winner if search ran), saves results as JSON, and renders a PNG comparison plot, writing everything under `--run-dir`:
 
 ```
 runs/demo/
@@ -264,9 +264,9 @@ runs/demo/
 ```
 
 **Resumability works at three levels:**
-1. **Pipeline step level** -- `pipeline_state.json` tracks completion of each `download_<eq>` / `search_<eq>` (if enabled) / `benchmark_<eq>` / `plot_<eq>` step plus a final `report` step. Re-running with the same `--run-dir` skips everything already done and only (re)runs what's left. A saved `search/<equation>.json` is reused for the benchmark step even on a later run where `--search` isn't passed again -- it's never silently discarded.
-2. **Training epoch level** -- each `benchmark_<eq>` step passes its own `checkpoint_dir`, so even if that step itself gets interrupted mid-training, retrying it resumes FNO/DeepONet from their last saved epoch (via `trainer.fit()`) instead of restarting. PINN isn't checkpointed (it retrains from scratch on retry, which is cheap -- seconds, not minutes, since it fits a single instance).
-3. **Search trial level** -- search trials themselves aren't individually checkpointed (they're small/fast by design), so an interrupted `search_<eq>` step restarts the grid from scratch on retry -- but once it completes, its result is durable (level 1).
+1. **Pipeline step level**: `pipeline_state.json` tracks completion of each `download_<eq>` / `search_<eq>` (if enabled) / `benchmark_<eq>` / `plot_<eq>` step plus a final `report` step. Re-running with the same `--run-dir` skips everything already done and only (re)runs what's left. A saved `search/<equation>.json` is reused for the benchmark step even on a later run where `--search` isn't passed again; it's never silently discarded.
+2. **Training epoch level**: each `benchmark_<eq>` step passes its own `checkpoint_dir`, so even if that step itself gets interrupted mid-training, retrying it resumes FNO/DeepONet from their last saved epoch (via `trainer.fit()`) instead of restarting. PINN isn't checkpointed (it retrains from scratch on retry, which is cheap: seconds, not minutes, since it fits a single instance).
+3. **Search trial level**: search trials themselves aren't individually checkpointed (they're small/fast by design), so an interrupted `search_<eq>` step restarts the grid from scratch on retry, but once it completes, its result is durable (level 1).
 
 Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `--force` (ignore saved state and redo every step), `--device`, `--search` (+ `--search-lr`/`--search-fno-width`/`--search-deeponet-hidden-dim`, each repeatable, + `--search-n-train`/`--search-n-test`/`--search-epochs`, + `--search-strategy {grid,random}`/`--search-n-trials`/`--search-seed` for the `random` strategy).
 
@@ -277,7 +277,7 @@ uv run pytest -v    # unit tests
 uv run ruff check   # lint
 ```
 
-CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs both on every push/PR to `main` via GitHub Actions. Real-data-conditional tests are skipped there (no PDEBench data is downloaded in CI) -- they run locally once you've run `fno-download`.
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs both on every push/PR to `main` via GitHub Actions. Real-data-conditional tests are skipped there (no PDEBench data is downloaded in CI); they run locally once you've run `fno-download`.
 
 ## License
 
