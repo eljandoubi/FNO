@@ -159,7 +159,10 @@ def save_search_result(
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(
-            {"best_hyperparams": asdict(best_hp), "trials": [asdict(t) for t in trials]},
+            {
+                "best_hyperparams": asdict(best_hp),
+                "trials": [asdict(t) for t in trials],
+            },
             f,
             indent=2,
         )
@@ -206,10 +209,16 @@ def main(argv: list[str] | None = None) -> None:
         help="Repeatable candidate lr values (default: 1e-3, 5e-4).",
     )
     parser.add_argument(
-        "--scheduler-step", type=int, action="append", help="Repeatable candidate values."
+        "--scheduler-step",
+        type=int,
+        action="append",
+        help="Repeatable candidate values.",
     )
     parser.add_argument(
-        "--scheduler-gamma", type=float, action="append", help="Repeatable candidate values."
+        "--scheduler-gamma",
+        type=float,
+        action="append",
+        help="Repeatable candidate values.",
     )
     parser.add_argument(
         "--fno-modes", type=int, action="append", help="Repeatable candidate values."
@@ -230,7 +239,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Repeatable candidate values (default: per-equation default, 64).",
     )
     parser.add_argument(
-        "--deeponet-latent-dim", type=int, action="append", help="Repeatable candidate values."
+        "--deeponet-latent-dim",
+        type=int,
+        action="append",
+        help="Repeatable candidate values.",
     )
     parser.add_argument(
         "--results-file",
@@ -248,8 +260,10 @@ def main(argv: list[str] | None = None) -> None:
         fno_modes=args.fno_modes or default_space.fno_modes,
         fno_width=args.fno_width or default_space.fno_width,
         fno_n_layers=args.fno_n_layers or default_space.fno_n_layers,
-        deeponet_hidden_dim=args.deeponet_hidden_dim or default_space.deeponet_hidden_dim,
-        deeponet_latent_dim=args.deeponet_latent_dim or default_space.deeponet_latent_dim,
+        deeponet_hidden_dim=args.deeponet_hidden_dim
+        or default_space.deeponet_hidden_dim,
+        deeponet_latent_dim=args.deeponet_latent_dim
+        or default_space.deeponet_latent_dim,
     )
 
     file_arg: str | Path | Sequence[str | Path] = (
@@ -270,7 +284,9 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"Tried {len(trials)} candidate(s):")
     for trial in trials:
-        print(f"  {trial.hyperparams} -> {trial.scores} (combined={trial.combined_score:.4f})")
+        print(
+            f"  {trial.hyperparams} -> {trial.scores} (combined={trial.combined_score:.4f})"
+        )
     print(f"\nBest: {asdict(best_hp)}")
 
     if args.results_file:
