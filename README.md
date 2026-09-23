@@ -111,10 +111,10 @@ history = train_pinn_navier_stokes(
 
 ## Benchmark
 
-`fno-benchmark` trains FNO2d and DeepONet on the same Darcy Flow data and fits a PINN to one held-out instance, then prints a comparison table (parameter count, train/inference time, relative $L^2$ error, and a genuine zero-shot super-resolution check):
+`fno-benchmark` trains FNO/DeepONet on the same data and fits a PINN to one held-out instance, then prints a comparison table (parameter count, train/inference time, relative $L^2$ error, and a genuine zero-shot super-resolution check). Pick which equation(s) with `--equation {darcy,burgers,navier-stokes,all}` (default `all`):
 
 ```bash
-uv run fno-benchmark --n-train 512 --n-test 64 --epochs 20 --pinn-epochs 500
+uv run fno-benchmark --equation darcy --n-train 512 --n-test 64 --epochs 20 --pinn-epochs 500
 ```
 
 ```
@@ -128,9 +128,37 @@ PINN (single-instance fit)      16,897        6.54       41.12    0.9968        
 
 *(Example output at the small defaults above -- few epochs, not tuned for accuracy. Increase `--epochs`/`--n-train` for meaningful numbers; the point of the default is to run fast.)*
 
-**The super-resolution check is real, not approximated**: FNO/DeepONet train on Darcy fields **downsampled to 64x64**, then get evaluated directly against PDEBench's **native 128x128** ground truth -- no synthetic high-res data needed, since the dataset already has it. This also surfaces a genuine architectural difference: FNO is resolution-independent on both input and output, but DeepONet's branch net has a fixed sensor count from training, so its super-resolution check keeps the branch input at 64x64 while only the trunk's query grid goes to 128x128 (see `_DeepONetSuperresView` in `fno/benchmarks/harness.py`).
+**The super-resolution check is real, not approximated**: for Darcy/Burgers, FNO/DeepONet train on fields **downsampled 2x/4x**, then get evaluated directly against PDEBench's **native-resolution** ground truth -- no synthetic high-res data needed, since the dataset already has it. Navier-Stokes uses two separately-strided readouts of the same shard(s) instead (`--low-res-stride`/`--high-res-stride` inside `run_navier_stokes_benchmark`). This also surfaces a genuine architectural difference: FNO is resolution-independent on both input and output, but DeepONet's branch net has a fixed sensor count from training, so its super-resolution check keeps the branch input at low-res while only the trunk's query grid goes high-res (see `_DeepONetSuperresView` / `_DeepONetSuperres1DView` / `_DeepONetNSSuperresView` in `fno/benchmarks/harness.py`).
 
-PINN's row isn't a fair comparison to the two operators above it and is labeled as such: it fits one specific field via its own physics residual rather than learning from many training samples, so "training cost" and "generalization error" mean different things for it.
+PINN's row isn't a fair comparison to the two operators above it and is labeled as such: it fits one specific instance via its own physics residual rather than learning from many training samples, so "training cost" and "generalization error" mean different things for it. For Burgers/Navier-Stokes, its held-out check is an actual extrapolation test (predict the final timestep from the initial condition/forcing alone), not just IC memorization.
+
+Results can be persisted as JSON (`--results-file path.json`) via `save_results`/`load_results`, and each model can checkpoint/resume its own training with `--checkpoint-dir` (backed by `trainer.fit()`'s epoch-level resume, see below).
+
+## Pipeline
+
+`fno-pipeline` runs the full **download -> train -> evaluate -> benchmark -> plot** flow for all three equations end to end, and is safe to interrupt (Ctrl-C, crash, killed process) and resume:
+
+```bash
+uv run fno-pipeline --run-dir runs/demo --epochs 20 --pinn-epochs 500
+```
+
+This downloads (if missing) each equation's default dataset variant, benchmarks FNO/DeepONet/PINN on it, saves results as JSON, and renders a PNG comparison plot -- writing everything under `--run-dir`:
+
+```
+runs/demo/
+  pipeline_state.json          # which steps have completed
+  checkpoints/<equation>/*.pt   # FNO/DeepONet training checkpoints (trainer.fit())
+  results/<equation>.json       # BenchmarkResult list, per equation
+  plots/<equation>_summary.png  # params/train-time/latency/error bar chart
+  plots/cross_equation_errors.png
+  report.md                     # combined human-readable summary
+```
+
+**Resumability works at two levels:**
+1. **Pipeline step level** -- `pipeline_state.json` tracks completion of each `download_<eq>` / `benchmark_<eq>` / `plot_<eq>` step plus a final `report` step. Re-running with the same `--run-dir` skips everything already done and only (re)runs what's left.
+2. **Training epoch level** -- each `benchmark_<eq>` step passes its own `checkpoint_dir`, so even if that step itself gets interrupted mid-training, retrying it resumes FNO/DeepONet from their last saved epoch (via `trainer.fit()`) instead of restarting. PINN isn't checkpointed (it retrains from scratch on retry, which is cheap -- seconds, not minutes, since it fits a single instance).
+
+Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `--force` (ignore saved state and redo every step), `--device`.
 
 ## Development
 
@@ -138,4 +166,5 @@ PINN's row isn't a fair comparison to the two operators above it and is labeled 
 uv run pytest -v    # unit tests
 uv run ruff check   # lint
 ```
+
 
