@@ -116,7 +116,11 @@ def fit(
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
 
-    run = wandb.init(project=config.wandb_project, config=asdict(config)) if config.use_wandb else None
+    run = (
+        wandb.init(project=config.wandb_project, config=asdict(config))
+        if config.use_wandb
+        else None
+    )
 
     history: dict[str, list[float]] = {"train_loss": [], "val_l2_error": []}
     for epoch in range(config.epochs):
@@ -125,7 +129,9 @@ def fit(
         history["train_loss"].append(train_loss)
         history["val_l2_error"].append(val_error)
         if run is not None:
-            run.log({"epoch": epoch, "train_loss": train_loss, "val_l2_error": val_error})
+            run.log(
+                {"epoch": epoch, "train_loss": train_loss, "val_l2_error": val_error}
+            )
 
     if run is not None:
         run.finish()

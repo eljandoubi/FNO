@@ -72,7 +72,9 @@ def _make_synthetic_loader(n=16, h=16, w=16, c_in=3, c_out=1, batch_size=4, seed
 
 def test_training_reduces_loss():
     torch.manual_seed(0)
-    model = FNO2d(modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=2)
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=2
+    )
     loader = _make_synthetic_loader()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     device = torch.device("cpu")
@@ -86,12 +88,16 @@ def test_training_reduces_loss():
 
 
 def test_checkpoint_roundtrip(tmp_path):
-    model = FNO2d(modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1)
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     path = tmp_path / "ckpt.pt"
     trainer.save_checkpoint(model, optimizer, epoch=5, path=path)
 
-    new_model = FNO2d(modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1)
+    new_model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
     new_optimizer = torch.optim.Adam(new_model.parameters(), lr=1e-3)
     epoch = trainer.load_checkpoint(new_model, new_optimizer, path)
 
@@ -126,7 +132,9 @@ def test_fit_logs_to_wandb_when_enabled(monkeypatch):
     fake_wandb = _FakeWandb()
     monkeypatch.setattr(trainer, "wandb", fake_wandb)
 
-    model = FNO2d(modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1)
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
     train_loader = _make_synthetic_loader()
     val_loader = _make_synthetic_loader()
     config = trainer.TrainConfig(epochs=2, device="cpu", use_wandb=True)
@@ -143,7 +151,9 @@ def test_fit_skips_wandb_when_disabled(monkeypatch):
     fake_wandb = _FakeWandb()
     monkeypatch.setattr(trainer, "wandb", fake_wandb)
 
-    model = FNO2d(modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1)
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
     train_loader = _make_synthetic_loader()
     val_loader = _make_synthetic_loader()
     config = trainer.TrainConfig(epochs=1, device="cpu", use_wandb=False)
@@ -157,10 +167,16 @@ def test_fit_skips_wandb_when_disabled(monkeypatch):
 def test_fit_on_small_real_darcy_subset():
     ds = DarcyFlowDataset(DARCY_FILE, train=True, train_split=0.9)
     # Mechanics check only -- not a real train/val split or accuracy benchmark.
-    train_loader = DataLoader(Subset(ds, range(16)), batch_size=4, collate_fn=darcy_collate)
-    val_loader = DataLoader(Subset(ds, range(16, 24)), batch_size=4, collate_fn=darcy_collate)
+    train_loader = DataLoader(
+        Subset(ds, range(16)), batch_size=4, collate_fn=darcy_collate
+    )
+    val_loader = DataLoader(
+        Subset(ds, range(16, 24)), batch_size=4, collate_fn=darcy_collate
+    )
 
-    model = FNO2d(modes1=8, modes2=8, width=16, in_channels=3, out_channels=1, n_layers=2)
+    model = FNO2d(
+        modes1=8, modes2=8, width=16, in_channels=3, out_channels=1, n_layers=2
+    )
     config = trainer.TrainConfig(epochs=2, lr=1e-3, device="cpu", use_wandb=False)
     history = trainer.fit(model, train_loader, val_loader, config)
 
@@ -190,8 +206,12 @@ def test_fit_on_small_real_burgers_subset():
 @pytest.mark.skipif(not NS_FILE.exists(), reason="NS_incom shard not downloaded")
 def test_fit_on_small_real_navier_stokes_subset():
     # Only 4 trajectories per shard -- use the dataset's own tiny train/test split.
-    train_ds = NavierStokes2DDataset(NS_FILE, initial_step=5, train=True, train_split=0.75)
-    val_ds = NavierStokes2DDataset(NS_FILE, initial_step=5, train=False, train_split=0.75)
+    train_ds = NavierStokes2DDataset(
+        NS_FILE, initial_step=5, train=True, train_split=0.75
+    )
+    val_ds = NavierStokes2DDataset(
+        NS_FILE, initial_step=5, train=False, train_split=0.75
+    )
     train_loader = DataLoader(train_ds, batch_size=1, collate_fn=navier_stokes_collate)
     val_loader = DataLoader(val_ds, batch_size=1, collate_fn=navier_stokes_collate)
 
