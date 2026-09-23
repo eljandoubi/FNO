@@ -122,6 +122,18 @@ def test_navier_stokes_dataset_concatenates_multiple_shards(tmp_path):
     assert len(ds) == 8
 
 
+def test_navier_stokes_dataset_spatial_stride(tmp_path):
+    path = tmp_path / "shard0.h5"
+    _write_ns_incom_h5(path, n=4, t=6, h=16, w=16)
+    ds = NavierStokes2DDataset(
+        path, initial_step=2, train=True, train_split=1.0, spatial_stride=4
+    )
+    inp, target, grid = ds[0]
+    assert inp.shape == (2, 2, 4, 4)
+    assert target.shape == (6, 2, 4, 4)
+    assert grid.shape == (4, 4, 2)
+
+
 def test_navier_stokes_dataset_train_test_split_sizes(tmp_path):
     path = tmp_path / "shard0.h5"
     _write_ns_incom_h5(path, n=4)

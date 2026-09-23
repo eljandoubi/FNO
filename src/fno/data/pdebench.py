@@ -8,6 +8,7 @@ All three dataset classes below are confirmed against real downloaded files via
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import h5py
 import numpy as np
@@ -117,6 +118,9 @@ class NavierStokes2DDataset(Dataset):
     only holds a handful of trajectories (N=4 as downloaded), so multiple shard
     paths can be passed and are concatenated along the sample axis. There is no
     x/y-coordinate key in the file; the grid is assumed to be the unit square.
+
+    `spatial_stride` subsamples H/W at read time (e.g. 8 -> 512 becomes 64),
+    which avoids loading the full-resolution arrays (~8GB+ per shard) into memory.
     """
 
     def __init__(
@@ -125,6 +129,7 @@ class NavierStokes2DDataset(Dataset):
         initial_step: int = 10,
         train: bool = True,
         train_split: float = 0.75,
+        spatial_stride: int = 1,
     ) -> None:
         if isinstance(file_paths, (str, Path)):
             file_paths = [file_paths]
@@ -137,9 +142,19 @@ class NavierStokes2DDataset(Dataset):
                 _require_keys(
                     set(f.keys()), {"velocity", "particles", "force", "t"}, path
                 )
-                velocities.append(np.asarray(f["velocity"], dtype=np.float32))
-                particles_list.append(np.asarray(f["particles"], dtype=np.float32))
-                forces.append(np.asarray(f["force"], dtype=np.float32))
+                s = spatial_stride
+                # Slicing the h5py Dataset (not a numpy array) subsamples at read
+                # time, so a stride > 1 never materializes the full-resolution array.
+                velocity_ds = cast("h5py.Dataset", f["velocity"])
+                particles_ds = cast("h5py.Dataset", f["particles"])
+                force_ds = cast("h5py.Dataset", f["force"])
+                velocities.append(
+                    np.asarray(velocity_ds[:, :, ::s, ::s, :], dtype=np.float32)
+                )
+                particles_list.append(
+                    np.asarray(particles_ds[:, :, ::s, ::s, :], dtype=np.float32)
+                )
+                forces.append(np.asarray(force_ds[:, ::s, ::s, :], dtype=np.float32))
                 times.append(np.asarray(f["t"], dtype=np.float32))
 
         velocity = np.concatenate(velocities, axis=0)  # (N, T, H, W, 2)
