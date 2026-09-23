@@ -65,6 +65,24 @@ input_field, target_field, grid = ds[0]
 
 All three accept `split="train"|"val"|"test"` and `split_fractions=(train, val, test)` (default `(0.8, 0.1, 0.1)`) -- validation is kept separate from the held-out test set specifically so hyperparameter tuning never touches test data.
 
+## Models
+
+Three operator-learning/PDE-solving architectures are implemented, mirroring the README's benchmark scope:
+
+- **`fno.models.fno`** (`FNO1d`/`FNO2d`) -- spectral convolutions truncated to a fixed number of Fourier modes, independent of spatial resolution (zero-shot super-resolution). Trained via `fno.training.trainer.fit()` with the `*_collate` adapters in `fno.training.collate`.
+- **`fno.models.deeponet`** (`DeepONet`) -- branch net encodes the input function at fixed sensors, trunk net encodes query coordinates, output is their dot product. The trunk can be queried at arbitrary/new points without retraining, but the branch's input size (sensor sampling) is fixed at construction. Trained the same way via `fit()`, using the `*_deeponet_collate` adapters.
+- **`fno.models.pinn`** (`PINN`) + **`fno.training.pinn`** -- a coordinate-to-solution MLP trained by minimizing the PDE residual (via autograd) plus an initial-condition data term. Unlike FNO/DeepONet, a PINN is **not an operator**: it solves one fixed PDE instance (one viscosity, one initial condition) and must be retrained for every new instance. Currently covers 1D Burgers' equation only -- Darcy's residual needs a differentiable interpolation of its discretized coefficient field, not yet implemented.
+
+```python
+from fno.models.pinn import PINN
+from fno.training.pinn import train_pinn_burgers
+
+model = PINN(in_dim=2, out_dim=1)
+history = train_pinn_burgers(
+    model, x_ic, u_ic, nu=0.01, domain_x=(0.0, 1.0), domain_t=(0.0, 2.0),
+)
+```
+
 ## Development
 
 ```bash
