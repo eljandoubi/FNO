@@ -14,7 +14,6 @@ operator), doesn't share FNO/DeepONet's architecture hyperparameters in a
 meaningful way, and is cheap enough to just run once at full scale anyway.
 """
 
-
 from __future__ import annotations
 
 import argparse
