@@ -162,6 +162,68 @@ def test_fit_resumes_from_checkpoint_instead_of_restarting(tmp_path):
     assert noop_history == second_history
 
 
+def test_scheduler_decays_lr_on_schedule():
+    torch.manual_seed(0)
+    train_loader = _make_synthetic_loader()
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
+    lrs_seen = []
+    for _ in range(4):
+        trainer.train_one_epoch(model, train_loader, optimizer, torch.device("cpu"))
+        scheduler.step()
+        lrs_seen.append(optimizer.param_groups[0]["lr"])
+
+    assert lrs_seen == pytest.approx([1e-3, 1e-3 * 0.5, 1e-3 * 0.5, 1e-3 * 0.25])
+
+
+def test_fit_applies_and_resumes_lr_schedule(tmp_path):
+    torch.manual_seed(0)
+    checkpoint_path = tmp_path / "ckpt.pt"
+    train_loader = _make_synthetic_loader()
+    val_loader = _make_synthetic_loader()
+
+    model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
+    config = trainer.TrainConfig(
+        epochs=2,
+        lr=1e-3,
+        scheduler_step=1,
+        scheduler_gamma=0.5,
+        device="cpu",
+        use_wandb=False,
+        checkpoint_path=str(checkpoint_path),
+    )
+    trainer.fit(model, train_loader, val_loader, config)
+
+    checkpoint = torch.load(checkpoint_path)
+    assert checkpoint["scheduler_state"]["_last_lr"] == pytest.approx([1e-3 * 0.25])
+
+    # Resume for 2 more epochs -- LR must continue decaying from where it left
+    # off (0.25x), not reset to the initial lr.
+    resumed_model = FNO2d(
+        modes1=4, modes2=4, width=8, in_channels=3, out_channels=1, n_layers=1
+    )
+    resumed_config = trainer.TrainConfig(
+        epochs=4,
+        lr=1e-3,
+        scheduler_step=1,
+        scheduler_gamma=0.5,
+        device="cpu",
+        use_wandb=False,
+        checkpoint_path=str(checkpoint_path),
+    )
+    trainer.fit(resumed_model, train_loader, val_loader, resumed_config)
+
+    resumed_checkpoint = torch.load(checkpoint_path)
+    assert resumed_checkpoint["scheduler_state"]["_last_lr"] == pytest.approx(
+        [1e-3 * 0.0625]
+    )
+
+
 class _FakeRun:
     def __init__(self):
         self.logged = []

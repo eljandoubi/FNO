@@ -130,3 +130,137 @@ def test_download_variant_checksum_mismatch_raises(tmp_path, monkeypatch):
             force=False,
         )
     assert not (cache_dir / "data.bin").exists()
+
+
+def test_expand_variant_selectors_handles_ranges_and_lists():
+    assert download._expand_variant_selectors(["shard0-shard3"]) == [
+        "shard0",
+        "shard1",
+        "shard2",
+        "shard3",
+    ]
+    assert download._expand_variant_selectors(["shard0,shard5,shard9"]) == [
+        "shard0",
+        "shard5",
+        "shard9",
+    ]
+    assert download._expand_variant_selectors(["shard0-shard2", "shard10"]) == [
+        "shard0",
+        "shard1",
+        "shard2",
+        "shard10",
+    ]
+    assert download._expand_variant_selectors(["nu0.01", "nu0.1"]) == [
+        "nu0.01",
+        "nu0.1",
+    ]
+
+
+def test_expand_variant_selectors_rejects_backwards_range():
+    with pytest.raises(SystemExit):
+        download._expand_variant_selectors(["shard9-shard0"])
+
+
+class _FakeDataverseResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def _fake_ns_incom_payload(n_shards: int = 5) -> dict:
+    return {
+        "data": {
+            "latestVersion": {
+                "files": [
+                    {
+                        "dataFile": {
+                            "id": 100 + i,
+                            "filename": f"ns_incom_inhom_2d_512-{i}.h5",
+                            "md5": None,
+                        }
+                    }
+                    for i in range(n_shards)
+                ]
+                + [
+                    # a non-NS_incom file that must be filtered out
+                    {
+                        "dataFile": {
+                            "id": 999999,
+                            "filename": "2D_DarcyFlow_beta0.01_Train.hdf5",
+                            "md5": "unrelated",
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+
+def test_fetch_ns_incom_shard_index_parses_and_filters(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        download.requests,
+        "get",
+        lambda url, timeout: _FakeDataverseResponse(_fake_ns_incom_payload(3)),
+    )
+
+    shards = download._fetch_ns_incom_shard_index(tmp_path / ".cache")
+
+    assert set(shards) == {"shard0", "shard1", "shard2"}
+    assert shards["shard0"].filename == "ns_incom_inhom_2d_512-0.h5"
+    assert shards["shard0"].url.endswith("/100")
+
+
+def test_fetch_ns_incom_shard_index_uses_cache(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_get(url, timeout):
+        calls.append(url)
+        return _FakeDataverseResponse(_fake_ns_incom_payload(2))
+
+    monkeypatch.setattr(download.requests, "get", fake_get)
+
+    cache_dir = tmp_path / ".cache"
+    download._fetch_ns_incom_shard_index(cache_dir)
+    download._fetch_ns_incom_shard_index(cache_dir)
+
+    assert len(calls) == 1
+    assert (cache_dir / "ns_incom_shard_index.json").exists()
+
+
+def test_main_navierstokes_variant_range_downloads_expected_shards(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        download.requests,
+        "get",
+        lambda url, timeout: _FakeDataverseResponse(_fake_ns_incom_payload(5)),
+    )
+
+    def fake_download_file(_url, dest, chunk_size=1 << 20):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x")
+
+    monkeypatch.setattr(download, "download_file", fake_download_file)
+
+    download.main(
+        [
+            "pdebench-navierstokes2d",
+            "--variant",
+            "shard1-shard3",
+            "--data-root",
+            str(tmp_path),
+        ]
+    )
+
+    dest_dir = tmp_path / "raw" / "pdebench-navierstokes2d"
+    assert sorted(p.name for p in dest_dir.iterdir()) == [
+        "ns_incom_inhom_2d_512-1.h5",
+        "ns_incom_inhom_2d_512-2.h5",
+        "ns_incom_inhom_2d_512-3.h5",
+    ]
+

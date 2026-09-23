@@ -76,6 +76,7 @@ def save_checkpoint(
     epoch: int,
     path: str | Path,
     history: dict[str, list[float]] | None = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,6 +87,7 @@ def save_checkpoint(
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
             "history": history or {},
+            "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
         },
         tmp_path,
     )
@@ -99,6 +101,7 @@ def load_checkpoint(
     optimizer: torch.optim.Optimizer | None,
     path: str | Path,
     map_location: str | None = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
 ) -> tuple[int, dict[str, list[float]]]:
     """Returns (epoch, history) -- `epoch` is the number of epochs already
     completed, i.e. training should resume starting at `range(epoch, ...)`.
@@ -107,6 +110,8 @@ def load_checkpoint(
     model.load_state_dict(checkpoint["model_state"])
     if optimizer is not None:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
+    if scheduler is not None and checkpoint.get("scheduler_state") is not None:
+        scheduler.load_state_dict(checkpoint["scheduler_state"])
     return checkpoint["epoch"], checkpoint.get("history", {})
 
 
@@ -114,6 +119,8 @@ def load_checkpoint(
 class TrainConfig:
     epochs: int = 10
     lr: float = 1e-3
+    scheduler_step: int | None = None  # StepLR: decay every N epochs if set
+    scheduler_gamma: float = 0.5
     device: str = field(default_factory=auto_device)
     use_wandb: bool = False
     wandb_project: str = "fno-benchmark"
@@ -136,12 +143,23 @@ def fit(
     device = torch.device(config.device)
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+    scheduler = (
+        torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=config.scheduler_step, gamma=config.scheduler_gamma
+        )
+        if config.scheduler_step
+        else None
+    )
 
     start_epoch = 0
     history: dict[str, list[float]] = {"train_loss": [], "val_l2_error": []}
     if config.checkpoint_path and Path(config.checkpoint_path).exists():
         start_epoch, loaded_history = load_checkpoint(
-            model, optimizer, config.checkpoint_path, map_location=str(device)
+            model,
+            optimizer,
+            config.checkpoint_path,
+            map_location=str(device),
+            scheduler=scheduler,
         )
         history["train_loss"] = list(loaded_history.get("train_loss", []))
         history["val_l2_error"] = list(loaded_history.get("val_l2_error", []))
@@ -155,6 +173,8 @@ def fit(
     for epoch in range(start_epoch, config.epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         val_error = evaluate(model, val_loader, device)
+        if scheduler is not None:
+            scheduler.step()
         history["train_loss"].append(train_loss)
         history["val_l2_error"].append(val_error)
         if run is not None:
@@ -163,7 +183,12 @@ def fit(
             )
         if config.checkpoint_path:
             save_checkpoint(
-                model, optimizer, epoch + 1, config.checkpoint_path, history
+                model,
+                optimizer,
+                epoch + 1,
+                config.checkpoint_path,
+                history,
+                scheduler=scheduler,
             )
 
     if run is not None:

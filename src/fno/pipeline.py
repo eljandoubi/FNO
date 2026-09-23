@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fno.benchmarks.harness import (
+    BenchmarkHyperparams,
     BenchmarkResult,
     format_summary,
     load_results,
@@ -62,6 +63,7 @@ class PipelineConfig:
     pinn_epochs: int = 500
     device: str | None = None
     force: bool = False  # re-run every step, ignoring saved state
+    hyperparams: BenchmarkHyperparams = field(default_factory=BenchmarkHyperparams)
 
 
 def _state_path(run_dir: Path) -> Path:
@@ -130,6 +132,7 @@ def _run_benchmark(
             pinn_epochs=config.pinn_epochs,
             device=config.device,
             checkpoint_dir=checkpoint_dir,
+            hyperparams=config.hyperparams,
         )
     if equation == "burgers":
         return run_burgers_benchmark(
@@ -140,6 +143,7 @@ def _run_benchmark(
             pinn_epochs=config.pinn_epochs,
             device=config.device,
             checkpoint_dir=checkpoint_dir,
+            hyperparams=config.hyperparams,
         )
     if equation == "navier_stokes":
         return run_navier_stokes_benchmark(
@@ -148,6 +152,7 @@ def _run_benchmark(
             pinn_epochs=config.pinn_epochs,
             device=config.device,
             checkpoint_dir=checkpoint_dir,
+            hyperparams=config.hyperparams,
         )
     raise ValueError(f"unknown equation: {equation!r}")
 
@@ -265,6 +270,49 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Re-run every step even if already marked completed.",
     )
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate for FNO/DeepONet/PINN.")
+    parser.add_argument(
+        "--scheduler-step",
+        type=int,
+        default=None,
+        help="StepLR: decay lr every N epochs (unset: constant lr). PDEBench's own FNO baselines use 100.",
+    )
+    parser.add_argument(
+        "--scheduler-gamma",
+        type=float,
+        default=0.5,
+        help="StepLR decay factor, only used if --scheduler-step is set.",
+    )
+    parser.add_argument(
+        "--fno-modes",
+        type=int,
+        default=None,
+        help="Override FNO's Fourier mode count (per-equation default otherwise).",
+    )
+    parser.add_argument(
+        "--fno-width",
+        type=int,
+        default=None,
+        help="Override FNO's channel width (per-equation default otherwise).",
+    )
+    parser.add_argument(
+        "--fno-n-layers",
+        type=int,
+        default=None,
+        help="Override FNO's number of spectral layers (per-equation default otherwise).",
+    )
+    parser.add_argument(
+        "--deeponet-hidden-dim",
+        type=int,
+        default=None,
+        help="Override DeepONet's branch/trunk hidden width (default 128).",
+    )
+    parser.add_argument(
+        "--deeponet-latent-dim",
+        type=int,
+        default=None,
+        help="Override DeepONet's latent (dot-product) dimension (default 64).",
+    )
     args = parser.parse_args(argv)
 
     config = PipelineConfig(
@@ -277,6 +325,16 @@ def main(argv: list[str] | None = None) -> None:
         pinn_epochs=args.pinn_epochs,
         device=args.device,
         force=args.force,
+        hyperparams=BenchmarkHyperparams(
+            lr=args.lr,
+            scheduler_step=args.scheduler_step,
+            scheduler_gamma=args.scheduler_gamma,
+            fno_modes=args.fno_modes,
+            fno_width=args.fno_width,
+            fno_n_layers=args.fno_n_layers,
+            deeponet_hidden_dim=args.deeponet_hidden_dim,
+            deeponet_latent_dim=args.deeponet_latent_dim,
+        ),
     )
 
     results_by_equation = run_pipeline(config)

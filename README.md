@@ -71,6 +71,7 @@ uv run fno-download --list                                   # available dataset
 uv run fno-download pdebench-darcy2d                          # 2D Darcy Flow sample (~1.2 GB)
 uv run fno-download pdebench-burgers1d --variant nu0.01       # 1D Burgers sample
 uv run fno-download pdebench-navierstokes2d --variant shard0  # 2D Navier-Stokes shard (~9.9 GB)
+uv run fno-download pdebench-navierstokes2d --variant shard0-shard9  # a range of 10 shards
 uv run fno-download airfrans                                  # 2D airfoil RANS CFD (~10 GB)
 ```
 
@@ -78,10 +79,11 @@ uv run fno-download airfrans                                  # 2D airfoil RANS 
 | --- | --- | --- |
 | `pdebench-burgers1d` | [PDEBench](https://github.com/pdebench/PDEBench) | 12 viscosities (`--variant nu0.001` ... `nu4.0`) |
 | `pdebench-darcy2d` | PDEBench | 5 diffusion coefficients (`--variant beta0.01` ... `beta100.0`) |
-| `pdebench-navierstokes2d` | PDEBench | 5 curated shards out of ~275 (`--variant shard0` ... `shard4`) |
+| `pdebench-navierstokes2d` | PDEBench | ~275 shards, fetched on demand from DaRUS's API and cached (`--variant shard0` ... `shard274`) |
 | `airfrans` | [AirfRANS](https://github.com/Extrality/AirfRANS) | irregular-geometry airfoil CFD, single archive |
 
-Files are checksum-verified (MD5) against PDEBench's published hashes where available. Use `--variant` (repeatable) or `--all-variants` to pick which files to pull, and `--force` to re-download.
+Files are checksum-verified (MD5) against PDEBench's published hashes where available. Use `--variant` (repeatable) or `--all-variants` to pick which files to pull, and `--force` to re-download. `--variant` also accepts comma-separated lists and, for Navier-Stokes, `shard<A>-shard<B>` ranges (e.g. `--variant shard0-shard9,shard50`) -- the full shard index is queried once from DaRUS's Dataverse API and cached under `<data-root>/.cache`, rather than hand-listing hundreds of file IDs.
+
 
 Before writing a loader for a new/unverified file format, inspect its real structure:
 
@@ -176,6 +178,28 @@ PINN (single-instance fit)      16,897        6.54       41.12    0.9968        
 PINN's row isn't a fair comparison to the two operators above it and is labeled as such: it fits one specific instance via its own physics residual rather than learning from many training samples, so "training cost" and "generalization error" mean different things for it. For Burgers/Navier-Stokes, its held-out check is an actual extrapolation test (predict the final timestep from the initial condition/forcing alone), not just IC memorization.
 
 Results can be persisted as JSON (`--results-file path.json`) via `save_results`/`load_results`, and each model can checkpoint/resume its own training with `--checkpoint-dir` (backed by `trainer.fit()`'s epoch-level resume, see below).
+
+### Tuning for real-world (non-demo) results
+
+The demo defaults above prioritize a fast run, not accuracy. `fno-benchmark`/`fno-pipeline` both expose the knobs needed for a serious run, grounded in PDEBench's own published FNO baseline configs (`config_Darcy.yaml`/`config_Bgs.yaml`: `modes=12, width=20, epochs=500, lr=1e-3` decayed `x0.5` every 100 epochs) and its PINN checkpoints (~15,000 iterations):
+
+| Flag | Demo default | Notes |
+| --- | --- | --- |
+| `--n-train` / `--n-test` | 512 / 64 | Darcy/Burgers have 8,000/1,000 samples available per the default split -- use most of it for real numbers |
+| `--epochs` | 20 | PDEBench's own FNO configs use 500 |
+| `--pinn-epochs` | 500 | PDEBench's own PINN checkpoints used ~15,000 iterations |
+| `--lr` | `1e-3` | applied to FNO, DeepONet, and PINN |
+| `--scheduler-step` / `--scheduler-gamma` | unset (constant lr) | e.g. `--scheduler-step 100 --scheduler-gamma 0.5` matches PDEBench's own recipe |
+| `--fno-modes` / `--fno-width` / `--fno-n-layers` | per-equation (12/32/4 Darcy, 16/64/4 Burgers, 8/16/3 NS) | override any of them; unset ones keep the per-equation default |
+| `--deeponet-hidden-dim` / `--deeponet-latent-dim` | 128 / 64 | |
+
+```bash
+uv run fno-pipeline --run-dir runs/real --equation darcy --equation burgers \
+  --n-train 7000 --n-test 1000 --epochs 500 --scheduler-step 100 --scheduler-gamma 0.5 \
+  --pinn-epochs 15000
+```
+
+Navier-Stokes needs more *data*, not just more epochs, to get meaningful numbers: only 4 trajectories/shard means even `--variant shard0-shard9` (10 shards) only gives 40 trajectories total.
 
 ## Pipeline
 

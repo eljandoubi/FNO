@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import re
 import shutil
 import tarfile
 import zipfile
@@ -14,6 +16,13 @@ import requests
 from tqdm import tqdm
 
 DEFAULT_DATA_ROOT = Path("data")
+
+# The full PDEBench dataset (all equations) lives in one DaRUS/Dataverse
+# record with ~275 incompressible NS shards -- rather than hand-transcribing
+# hundreds of file IDs/checksums (error-prone), fetch the authoritative list
+# from the Dataverse API at runtime and cache it locally.
+NS_INCOM_DATASET_DOI = "doi:10.18419/darus-2986"
+_NS_INCOM_FILENAME_RE = re.compile(r"^ns_incom_inhom_2d_512-(\d+)\.h5$")
 
 
 @dataclass(frozen=True)
@@ -30,6 +39,61 @@ class Dataset:
     files: dict[str, DatasetFile]
     default_variant: str
     extract: bool = True
+
+
+def _fetch_ns_incom_shard_index(cache_dir: Path) -> dict[str, DatasetFile]:
+    """Query DaRUS's Dataverse API for the full incompressible NS shard list
+    (~275 shards) and cache the raw response locally, so `--variant shardN`
+    works for any N without hardcoding hundreds of file IDs/checksums in
+    source (which would also risk transcription errors for the checksums).
+    """
+    cache_path = cache_dir / "ns_incom_shard_index.json"
+    if cache_path.exists():
+        raw = json.loads(cache_path.read_text())
+    else:
+        url = (
+            "https://darus.uni-stuttgart.de/api/datasets/:persistentId/"
+            f"?persistentId={NS_INCOM_DATASET_DOI}"
+        )
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        raw = response.json()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(raw))
+
+    shards: dict[str, DatasetFile] = {}
+    for entry in raw["data"]["latestVersion"]["files"]:
+        data_file = entry["dataFile"]
+        match = _NS_INCOM_FILENAME_RE.match(data_file["filename"])
+        if not match:
+            continue
+        shards[f"shard{int(match.group(1))}"] = DatasetFile(
+            url=f"https://darus.uni-stuttgart.de/api/access/datafile/{data_file['id']}",
+            filename=data_file["filename"],
+            md5=data_file.get("md5"),
+        )
+    return shards
+
+
+_SHARD_RANGE_RE = re.compile(r"^shard(\d+)-shard(\d+)$")
+
+
+def _expand_variant_selectors(selectors: list[str]) -> list[str]:
+    """Expand comma-separated lists and shard<A>-shard<B> ranges within each
+    --variant value, e.g. "shard0-shard9,shard20" -> shard0..shard9, shard20.
+    """
+    expanded: list[str] = []
+    for selector in selectors:
+        for part in (p.strip() for p in selector.split(",")):
+            match = _SHARD_RANGE_RE.match(part)
+            if match:
+                start, end = int(match.group(1)), int(match.group(2))
+                if start > end:
+                    raise SystemExit(f"Invalid shard range '{part}': start > end")
+                expanded.extend(f"shard{i}" for i in range(start, end + 1))
+            elif part:
+                expanded.append(part)
+    return expanded
 
 
 DATASETS: dict[str, Dataset] = {
@@ -155,33 +219,18 @@ DATASETS: dict[str, Dataset] = {
         name="pdebench-navierstokes2d",
         description=(
             "PDEBench 2D incompressible Navier-Stokes -- pick one or more shards "
-            "(~8 GB each; only 5 of the ~275 total shards are registered here)."
+            "(~8-10 GB each, ~275 total). Supports --variant shard<A>-shard<B> "
+            "ranges and comma-separated lists."
         ),
         files={
+            # Just the default variant is kept here as a static fallback (used
+            # by generic registry tests and if --list/--variant is never hit);
+            # `main()` always resolves the full ~275-shard range dynamically
+            # via `_fetch_ns_incom_shard_index` instead of this dict.
             "shard0": DatasetFile(
                 url="https://darus.uni-stuttgart.de/api/access/datafile/133280",
                 filename="ns_incom_inhom_2d_512-0.h5",
                 md5="54109d46f9c957317bd670ddb2068ac0",
-            ),
-            "shard1": DatasetFile(
-                url="https://darus.uni-stuttgart.de/api/access/datafile/136439",
-                filename="ns_incom_inhom_2d_512-1.h5",
-                md5="e280fd3208fccb8ad5c1ff46c4796864",
-            ),
-            "shard2": DatasetFile(
-                url="https://darus.uni-stuttgart.de/api/access/datafile/133721",
-                filename="ns_incom_inhom_2d_512-2.h5",
-                md5="1d7a2aac41a410bea6c887f624273d20",
-            ),
-            "shard3": DatasetFile(
-                url="https://darus.uni-stuttgart.de/api/access/datafile/136466",
-                filename="ns_incom_inhom_2d_512-3.h5",
-                md5="e9c92a19854e96c918d3a46d39994be4",
-            ),
-            "shard4": DatasetFile(
-                url="https://darus.uni-stuttgart.de/api/access/datafile/166289",
-                filename="ns_incom_inhom_2d_512-4.h5",
-                md5="306a56ac14ea5686921cbb3f09c7dcb6",
             ),
         },
         default_variant="shard0",
@@ -228,7 +277,17 @@ def _list_datasets() -> None:
     print("Available datasets:")
     for key, spec in sorted(DATASETS.items()):
         print(f"  {key:<24} {spec.description}")
-        if len(spec.files) > 1:
+        if key == "pdebench-navierstokes2d":
+            print(
+                "      variants (--variant): shard0, shard1, ... shard274 (fetched "
+                "from DaRUS on first use, then cached) [default: "
+                f"{spec.default_variant}]"
+            )
+            print(
+                "      also accepts ranges/lists, e.g. --variant shard0-shard9 "
+                "or --variant shard0,shard5,shard12"
+            )
+        elif len(spec.files) > 1:
             variants = ", ".join(sorted(spec.files))
             print(
                 f"      variants (--variant): {variants}  [default: {spec.default_variant}]"
@@ -297,8 +356,10 @@ def main(argv: list[str] | None = None) -> None:
         metavar="KEY",
         help=(
             "Select a specific file to download (repeatable, e.g. --variant nu0.01 "
-            "--variant nu0.1). Defaults to the dataset's default variant. Use "
-            "--list to see available variants per dataset."
+            "--variant nu0.1). Also accepts comma-separated lists and, for "
+            "pdebench-navierstokes2d, shard<A>-shard<B> ranges (e.g. "
+            "--variant shard0-shard9). Defaults to the dataset's default variant. "
+            "Use --list to see available variants per dataset."
         ),
     )
     parser.add_argument(
@@ -333,26 +394,31 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     spec = DATASETS[args.dataset]
+    cache_dir = args.data_root / ".cache"
+    files = (
+        _fetch_ns_incom_shard_index(cache_dir)
+        if spec.name == "pdebench-navierstokes2d"
+        else spec.files
+    )
 
     if args.all_variants:
-        selected = sorted(spec.files)
+        selected = sorted(files)
     elif args.variant:
-        unknown = set(args.variant) - spec.files.keys()
+        selected = _expand_variant_selectors(args.variant)
+        unknown = set(selected) - files.keys()
         if unknown:
             raise SystemExit(
                 f"Unknown variant(s) for '{spec.name}': {', '.join(sorted(unknown))}. "
-                f"Available: {', '.join(sorted(spec.files))}"
+                f"Available: {', '.join(sorted(files)) if len(files) <= 20 else f'{len(files)} shards -- see --list'}"
             )
-        selected = args.variant
     else:
         selected = [spec.default_variant]
 
     dataset_dest = args.data_root / "raw" / spec.name
-    cache_dir = args.data_root / ".cache"
 
     for variant_key in selected:
         _download_variant(
-            spec.files[variant_key],
+            files[variant_key],
             dataset_dest,
             cache_dir,
             extract=spec.extract,

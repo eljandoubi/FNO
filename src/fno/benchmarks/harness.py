@@ -68,6 +68,24 @@ class BenchmarkResult:
     note: str = ""
 
 
+@dataclass
+class BenchmarkHyperparams:
+    """Optimizer/architecture overrides for `run_*_benchmark`. Fields left as
+    `None` fall back to that function's own per-equation default (tuned for a
+    fast demo run, not necessarily good accuracy -- see README for real-world
+    values based on PDEBench's own published FNO baseline configs).
+    """
+
+    lr: float = 1e-3
+    scheduler_step: int | None = None  # StepLR: decay every N epochs if set
+    scheduler_gamma: float = 0.5
+    fno_modes: int | None = None
+    fno_width: int | None = None
+    fno_n_layers: int | None = None
+    deeponet_hidden_dim: int | None = None
+    deeponet_latent_dim: int | None = None
+
+
 def save_results(results: list[BenchmarkResult], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +97,7 @@ def load_results(path: str | Path) -> list[BenchmarkResult]:
     with open(path) as f:
         data = json.load(f)
     return [BenchmarkResult(**d) for d in data]
+
 
 
 class _DownsampledDarcyView(Dataset):
@@ -195,6 +214,7 @@ def benchmark_pinn_darcy(
     domain: tuple[float, float, float, float],
     forcing: float = 1.0,
     epochs: int = 500,
+    lr: float = 1e-3,
     device: str = "cpu",
 ) -> BenchmarkResult:
     """Fit a PINN directly to ONE Darcy instance and compare against its
@@ -205,7 +225,13 @@ def benchmark_pinn_darcy(
 
     start = time.perf_counter()
     train_pinn_darcy(
-        model, coefficient_field, domain, forcing=forcing, epochs=epochs, device=device
+        model,
+        coefficient_field,
+        domain,
+        forcing=forcing,
+        epochs=epochs,
+        lr=lr,
+        device=device,
     )
     train_time_s = time.perf_counter() - start
 
@@ -247,6 +273,20 @@ def _checkpoint_path(checkpoint_dir: str | Path | None, name: str) -> str | None
     return str(Path(checkpoint_dir) / f"{name}.pt")
 
 
+def _train_config(
+    hp: BenchmarkHyperparams, epochs: int, device: str, checkpoint_path: str | None
+) -> trainer.TrainConfig:
+    return trainer.TrainConfig(
+        epochs=epochs,
+        lr=hp.lr,
+        scheduler_step=hp.scheduler_step,
+        scheduler_gamma=hp.scheduler_gamma,
+        device=device,
+        use_wandb=False,
+        checkpoint_path=checkpoint_path,
+    )
+
+
 def run_darcy_benchmark(
     file_path: str | Path,
     n_train: int = 512,
@@ -255,8 +295,10 @@ def run_darcy_benchmark(
     pinn_epochs: int = 500,
     device: str | None = None,
     checkpoint_dir: str | Path | None = None,
+    hyperparams: BenchmarkHyperparams | None = None,
 ) -> list[BenchmarkResult]:
     device = device or trainer.auto_device()
+    hp = hyperparams or BenchmarkHyperparams()
 
     full_train = DarcyFlowDataset(file_path, split="train")
     full_test = DarcyFlowDataset(file_path, split="test")
@@ -277,13 +319,15 @@ def run_darcy_benchmark(
         full_res_test, batch_size=32, collate_fn=darcy_collate
     )
     fno_model = FNO2d(
-        modes1=12, modes2=12, width=32, in_channels=3, out_channels=1, n_layers=4
+        modes1=hp.fno_modes or 12,
+        modes2=hp.fno_modes or 12,
+        width=hp.fno_width or 32,
+        in_channels=3,
+        out_channels=1,
+        n_layers=hp.fno_n_layers or 4,
     )
-    fno_config = trainer.TrainConfig(
-        epochs=epochs,
-        device=device,
-        use_wandb=False,
-        checkpoint_path=_checkpoint_path(checkpoint_dir, "darcy_fno2d"),
+    fno_config = _train_config(
+        hp, epochs, device, _checkpoint_path(checkpoint_dir, "darcy_fno2d")
     )
     results.append(
         benchmark_operator(
@@ -314,15 +358,12 @@ def run_darcy_benchmark(
     deeponet_model = DeepONet(
         branch_input_dim=field0.numel(),
         trunk_input_dim=2,
-        hidden_dim=128,
-        latent_dim=64,
+        hidden_dim=hp.deeponet_hidden_dim or 128,
+        latent_dim=hp.deeponet_latent_dim or 64,
         out_channels=1,
     )
-    deeponet_config = trainer.TrainConfig(
-        epochs=epochs,
-        device=device,
-        use_wandb=False,
-        checkpoint_path=_checkpoint_path(checkpoint_dir, "darcy_deeponet"),
+    deeponet_config = _train_config(
+        hp, epochs, device, _checkpoint_path(checkpoint_dir, "darcy_deeponet")
     )
     results.append(
         benchmark_operator(
@@ -350,6 +391,7 @@ def run_darcy_benchmark(
                 pinn_grid[..., 1].max().item(),
             ),
             epochs=pinn_epochs,
+            lr=hp.lr,
             device=device,
         )
     )
@@ -432,6 +474,7 @@ def benchmark_pinn_burgers(
     domain_t: tuple[float, float],
     target_final: Tensor,
     epochs: int = 2000,
+    lr: float = 1e-3,
     device: str = "cpu",
 ) -> BenchmarkResult:
     """Fit a PINN to ONE Burgers instance (its initial condition), then
@@ -443,7 +486,7 @@ def benchmark_pinn_burgers(
 
     start = time.perf_counter()
     train_pinn_burgers(
-        model, x_ic, u_ic, nu, domain_x, domain_t, epochs=epochs, device=device
+        model, x_ic, u_ic, nu, domain_x, domain_t, epochs=epochs, lr=lr, device=device
     )
     train_time_s = time.perf_counter() - start
 
@@ -483,8 +526,10 @@ def run_burgers_benchmark(
     pinn_epochs: int = 2000,
     device: str | None = None,
     checkpoint_dir: str | Path | None = None,
+    hyperparams: BenchmarkHyperparams | None = None,
 ) -> list[BenchmarkResult]:
     device = device or trainer.auto_device()
+    hp = hyperparams or BenchmarkHyperparams()
 
     full_train = Burgers1DDataset(file_path, initial_step=10, split="train")
     full_test = Burgers1DDataset(file_path, initial_step=10, split="test")
@@ -506,12 +551,15 @@ def run_burgers_benchmark(
     fno_superres_loader = DataLoader(
         full_res_test, batch_size=32, collate_fn=burgers_collate
     )
-    fno_model = FNO1d(modes=16, width=64, in_channels=11, out_channels=1, n_layers=4)
-    fno_config = trainer.TrainConfig(
-        epochs=epochs,
-        device=device,
-        use_wandb=False,
-        checkpoint_path=_checkpoint_path(checkpoint_dir, "burgers_fno1d"),
+    fno_model = FNO1d(
+        modes=hp.fno_modes or 16,
+        width=hp.fno_width or 64,
+        in_channels=11,
+        out_channels=1,
+        n_layers=hp.fno_n_layers or 4,
+    )
+    fno_config = _train_config(
+        hp, epochs, device, _checkpoint_path(checkpoint_dir, "burgers_fno1d")
     )
     results.append(
         benchmark_operator(
@@ -540,15 +588,12 @@ def run_burgers_benchmark(
     deeponet_model = DeepONet(
         branch_input_dim=window0.numel(),
         trunk_input_dim=1,
-        hidden_dim=128,
-        latent_dim=64,
+        hidden_dim=hp.deeponet_hidden_dim or 128,
+        latent_dim=hp.deeponet_latent_dim or 64,
         out_channels=1,
     )
-    deeponet_config = trainer.TrainConfig(
-        epochs=epochs,
-        device=device,
-        use_wandb=False,
-        checkpoint_path=_checkpoint_path(checkpoint_dir, "burgers_deeponet"),
+    deeponet_config = _train_config(
+        hp, epochs, device, _checkpoint_path(checkpoint_dir, "burgers_deeponet")
     )
     results.append(
         benchmark_operator(
@@ -572,6 +617,7 @@ def run_burgers_benchmark(
             domain_t=(full_test.t.min().item(), full_test.t.max().item()),
             target_final=pinn_trajectory[-1],
             epochs=pinn_epochs,
+            lr=hp.lr,
             device=device,
         )
     )
@@ -593,6 +639,7 @@ def benchmark_pinn_navier_stokes(
     target_u_final: Tensor,
     target_v_final: Tensor,
     epochs: int = 500,
+    lr: float = 1e-3,
     device: str = "cpu",
 ) -> BenchmarkResult:
     """Fit a PINN to ONE Navier-Stokes instance (its forcing + initial
@@ -615,6 +662,7 @@ def benchmark_pinn_navier_stokes(
         v_ic,
         domain_t,
         epochs=epochs,
+        lr=lr,
         device=device,
     )
     train_time_s = time.perf_counter() - start
@@ -662,12 +710,14 @@ def run_navier_stokes_benchmark(
     high_res_stride: int = 8,
     device: str | None = None,
     checkpoint_dir: str | Path | None = None,
+    hyperparams: BenchmarkHyperparams | None = None,
 ) -> list[BenchmarkResult]:
     """Only 4 trajectories per downloaded shard, so this uses a (0.5, 0.0, 0.5)
     train/test split by default rather than the usual (0.8, 0.1, 0.1) -- pass
     multiple shard paths for a more meaningful split.
     """
     device = device or trainer.auto_device()
+    hp = hyperparams or BenchmarkHyperparams()
     fractions = (0.5, 0.0, 0.5)
     paths: str | Path | list[str | Path] = (
         file_paths if isinstance(file_paths, (str, Path)) else list(file_paths)
@@ -708,18 +758,15 @@ def run_navier_stokes_benchmark(
     )
     in_channels = 5 * 2 + 2
     fno_model = FNO2d(
-        modes1=8,
-        modes2=8,
-        width=16,
+        modes1=hp.fno_modes or 8,
+        modes2=hp.fno_modes or 8,
+        width=hp.fno_width or 16,
         in_channels=in_channels,
         out_channels=2,
-        n_layers=3,
+        n_layers=hp.fno_n_layers or 3,
     )
-    fno_config = trainer.TrainConfig(
-        epochs=epochs,
-        device=device,
-        use_wandb=False,
-        checkpoint_path=_checkpoint_path(checkpoint_dir, "navierstokes_fno2d"),
+    fno_config = _train_config(
+        hp, epochs, device, _checkpoint_path(checkpoint_dir, "navierstokes_fno2d")
     )
     results.append(
         benchmark_operator(
@@ -749,15 +796,12 @@ def run_navier_stokes_benchmark(
     deeponet_model = DeepONet(
         branch_input_dim=window0.numel(),
         trunk_input_dim=2,
-        hidden_dim=128,
-        latent_dim=64,
+        hidden_dim=hp.deeponet_hidden_dim or 128,
+        latent_dim=hp.deeponet_latent_dim or 64,
         out_channels=2,
     )
-    deeponet_config = trainer.TrainConfig(
-        epochs=epochs,
-        device=device,
-        use_wandb=False,
-        checkpoint_path=_checkpoint_path(checkpoint_dir, "navierstokes_deeponet"),
+    deeponet_config = _train_config(
+        hp, epochs, device, _checkpoint_path(checkpoint_dir, "navierstokes_deeponet")
     )
     results.append(
         benchmark_operator(
@@ -793,6 +837,7 @@ def run_navier_stokes_benchmark(
             target_u_final=velocity0[-1, 0],
             target_v_final=velocity0[-1, 1],
             epochs=pinn_epochs,
+            lr=hp.lr,
             device=device,
         )
     )
@@ -876,7 +921,61 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Save the combined results (all benchmarked equations) as JSON here.",
     )
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate for FNO/DeepONet/PINN.")
+    parser.add_argument(
+        "--scheduler-step",
+        type=int,
+        default=None,
+        help="StepLR: decay lr every N epochs (unset: constant lr). PDEBench's own FNO baselines use 100.",
+    )
+    parser.add_argument(
+        "--scheduler-gamma",
+        type=float,
+        default=0.5,
+        help="StepLR decay factor, only used if --scheduler-step is set.",
+    )
+    parser.add_argument(
+        "--fno-modes",
+        type=int,
+        default=None,
+        help="Override FNO's Fourier mode count (per-equation default otherwise).",
+    )
+    parser.add_argument(
+        "--fno-width",
+        type=int,
+        default=None,
+        help="Override FNO's channel width (per-equation default otherwise).",
+    )
+    parser.add_argument(
+        "--fno-n-layers",
+        type=int,
+        default=None,
+        help="Override FNO's number of spectral layers (per-equation default otherwise).",
+    )
+    parser.add_argument(
+        "--deeponet-hidden-dim",
+        type=int,
+        default=None,
+        help="Override DeepONet's branch/trunk hidden width (default 128).",
+    )
+    parser.add_argument(
+        "--deeponet-latent-dim",
+        type=int,
+        default=None,
+        help="Override DeepONet's latent (dot-product) dimension (default 64).",
+    )
     args = parser.parse_args(argv)
+
+    hyperparams = BenchmarkHyperparams(
+        lr=args.lr,
+        scheduler_step=args.scheduler_step,
+        scheduler_gamma=args.scheduler_gamma,
+        fno_modes=args.fno_modes,
+        fno_width=args.fno_width,
+        fno_n_layers=args.fno_n_layers,
+        deeponet_hidden_dim=args.deeponet_hidden_dim,
+        deeponet_latent_dim=args.deeponet_latent_dim,
+    )
 
     ns_files = args.navier_stokes_file or [
         Path("data/raw/pdebench-navierstokes2d/ns_incom_inhom_2d_512-0.h5")
@@ -898,6 +997,7 @@ def main(argv: list[str] | None = None) -> None:
             pinn_epochs=args.pinn_epochs,
             device=args.device,
             checkpoint_dir=args.checkpoint_dir,
+            hyperparams=hyperparams,
         )
         print_summary(results)
         all_results.extend(results)
@@ -916,6 +1016,7 @@ def main(argv: list[str] | None = None) -> None:
             pinn_epochs=args.pinn_epochs,
             device=args.device,
             checkpoint_dir=args.checkpoint_dir,
+            hyperparams=hyperparams,
         )
         print_summary(results)
         all_results.extend(results)
@@ -933,6 +1034,7 @@ def main(argv: list[str] | None = None) -> None:
             pinn_epochs=args.pinn_epochs,
             device=args.device,
             checkpoint_dir=args.checkpoint_dir,
+            hyperparams=hyperparams,
         )
         print_summary(results)
         all_results.extend(results)

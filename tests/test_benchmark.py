@@ -13,10 +13,12 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from fno.benchmarks.harness import (
+    BenchmarkHyperparams,
     BenchmarkResult,
     _deeponet_superres_collate,
     _DeepONetSuperresView,
     _DownsampledDarcyView,
+    _train_config,
     benchmark_operator,
     benchmark_pinn_darcy,
     count_parameters,
@@ -143,6 +145,57 @@ def test_benchmark_pinn_darcy_mechanics():
     assert math.isfinite(result.test_l2_error)
     assert result.superres_l2_error is None
     assert "not directly comparable" in result.note
+
+
+def test_train_config_helper_applies_hyperparams():
+    hp = BenchmarkHyperparams(lr=5e-4, scheduler_step=10, scheduler_gamma=0.1)
+    config = _train_config(hp, epochs=7, device="cpu", checkpoint_path="foo.pt")
+
+    assert config.epochs == 7
+    assert config.lr == 5e-4
+    assert config.scheduler_step == 10
+    assert config.scheduler_gamma == 0.1
+    assert config.device == "cpu"
+    assert config.checkpoint_path == "foo.pt"
+
+
+def test_run_darcy_benchmark_respects_hyperparams_overrides(tmp_path):
+    import h5py
+    import numpy as np
+
+    path = tmp_path / "darcy.hdf5"
+    with h5py.File(path, "w") as f:
+        f["nu"] = np.random.rand(20, 16, 16).astype(np.float32)
+        f["tensor"] = np.random.rand(20, 16, 16).astype(np.float32)
+        f["x-coordinate"] = np.linspace(0, 1, 16, dtype=np.float32)
+        f["y-coordinate"] = np.linspace(0, 1, 16, dtype=np.float32)
+
+    default_results = run_darcy_benchmark(
+        path, n_train=4, n_test=2, epochs=1, pinn_epochs=1, device="cpu"
+    )
+    small_results = run_darcy_benchmark(
+        path,
+        n_train=4,
+        n_test=2,
+        epochs=1,
+        pinn_epochs=1,
+        device="cpu",
+        hyperparams=BenchmarkHyperparams(
+            fno_modes=2,
+            fno_width=4,
+            fno_n_layers=1,
+            deeponet_hidden_dim=8,
+            deeponet_latent_dim=4,
+        ),
+    )
+
+    default_fno = next(r for r in default_results if r.name == "FNO2d")
+    small_fno = next(r for r in small_results if r.name == "FNO2d")
+    assert small_fno.n_parameters < default_fno.n_parameters
+
+    default_deeponet = next(r for r in default_results if r.name == "DeepONet")
+    small_deeponet = next(r for r in small_results if r.name == "DeepONet")
+    assert small_deeponet.n_parameters < default_deeponet.n_parameters
 
 
 @pytest.mark.skipif(not DARCY_FILE.exists(), reason="Darcy sample not downloaded")
