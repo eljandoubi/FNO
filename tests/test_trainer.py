@@ -212,6 +212,11 @@ def test_fit_on_small_real_navier_stokes_subset():
     val_ds = NavierStokes2DDataset(
         NS_FILE, initial_step=5, train=False, train_split=0.75
     )
+    # Spatially subsampled 512 -> 64 purely for test speed; still real downloaded data.
+    for ds in (train_ds, val_ds):
+        ds.velocity = ds.velocity[:, :, :, ::8, ::8]
+        ds.grid = ds.grid[::8, ::8]
+
     train_loader = DataLoader(train_ds, batch_size=1, collate_fn=navier_stokes_collate)
     val_loader = DataLoader(val_ds, batch_size=1, collate_fn=navier_stokes_collate)
 
