@@ -17,9 +17,11 @@ from fno.models.fno import FNO1d, FNO2d
 from fno.training import trainer
 from fno.training.collate import (
     burgers_collate,
+    burgers_deeponet_collate,
     darcy_collate,
     darcy_deeponet_collate,
     navier_stokes_collate,
+    navier_stokes_deeponet_collate,
 )
 
 DARCY_FILE = Path("data/raw/pdebench-darcy2d/2D_DarcyFlow_beta1.0_Train.hdf5")
@@ -275,4 +277,60 @@ def test_fit_deeponet_on_small_real_darcy_subset():
     history = trainer.fit(model, train_loader, val_loader, config)
 
     assert len(history["train_loss"]) == 2
+    assert all(v >= 0 for v in history["val_l2_error"])
+
+
+@pytest.mark.skipif(not BURGERS_FILE.exists(), reason="Burgers sample not downloaded")
+def test_fit_deeponet_on_small_real_burgers_subset():
+    ds = Burgers1DDataset(BURGERS_FILE, initial_step=10, split="train")
+    # Mechanics check only -- not a real train/val split or accuracy benchmark.
+    train_loader = DataLoader(
+        Subset(ds, range(16)), batch_size=4, collate_fn=burgers_deeponet_collate
+    )
+    val_loader = DataLoader(
+        Subset(ds, range(16, 24)), batch_size=4, collate_fn=burgers_deeponet_collate
+    )
+
+    model = DeepONet(
+        branch_input_dim=10 * 1024,
+        trunk_input_dim=1,
+        hidden_dim=32,
+        latent_dim=16,
+        out_channels=1,
+    )
+    config = trainer.TrainConfig(epochs=2, lr=1e-3, device="cpu", use_wandb=False)
+    history = trainer.fit(model, train_loader, val_loader, config)
+
+    assert len(history["train_loss"]) == 2
+    assert all(v >= 0 for v in history["val_l2_error"])
+
+
+@pytest.mark.skipif(not NS_FILE.exists(), reason="NS_incom shard not downloaded")
+def test_fit_deeponet_on_small_real_navier_stokes_subset():
+    # Only 4 trajectories per shard -- fractions chosen so train/val are both non-empty.
+    # spatial_stride=8 (512 -> 64) keeps this fast without loading full-res arrays.
+    fractions = (0.5, 0.25, 0.25)
+    train_ds = NavierStokes2DDataset(
+        NS_FILE, initial_step=5, split="train", split_fractions=fractions, spatial_stride=8
+    )
+    val_ds = NavierStokes2DDataset(
+        NS_FILE, initial_step=5, split="val", split_fractions=fractions, spatial_stride=8
+    )
+
+    train_loader = DataLoader(
+        train_ds, batch_size=1, collate_fn=navier_stokes_deeponet_collate
+    )
+    val_loader = DataLoader(val_ds, batch_size=1, collate_fn=navier_stokes_deeponet_collate)
+
+    model = DeepONet(
+        branch_input_dim=5 * 2 * 64 * 64,
+        trunk_input_dim=2,
+        hidden_dim=32,
+        latent_dim=16,
+        out_channels=2,
+    )
+    config = trainer.TrainConfig(epochs=1, lr=1e-3, device="cpu", use_wandb=False)
+    history = trainer.fit(model, train_loader, val_loader, config)
+
+    assert len(history["train_loss"]) == 1
     assert all(v >= 0 for v in history["val_l2_error"])
