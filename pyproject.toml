@@ -1,0 +1,30 @@
+[project]
+name = "fno"
+version = "0.1.0"
+description = "Fourier Neural Operator benchmark against DeepONet and PINNs for PDE surrogate modeling"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    { name = "eljandoubi_a", email = "abdelkarim.eljandoubi@lcl.fr" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "einops>=0.8.2",
+    "h5py>=3.16.0",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pyyaml>=6.0.3",
+    "scipy>=1.18.1",
+    "torch>=2.14.0",
+    "tqdm>=4.70.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.16,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+]
