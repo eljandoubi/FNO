@@ -11,6 +11,7 @@ import torch
 import wandb
 from torch import nn
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 
 def auto_device() -> str:
@@ -127,6 +128,7 @@ class TrainConfig:
     use_wandb: bool = False
     wandb_project: str = "fno-benchmark"
     checkpoint_path: str | None = None
+    progress: bool = True  # live tqdm bar over epochs, with loss/error postfix
 
 
 def fit(
@@ -172,13 +174,23 @@ def fit(
         else None
     )
 
-    for epoch in range(start_epoch, config.epochs):
+    epoch_bar = tqdm(
+        range(start_epoch, config.epochs),
+        total=config.epochs,
+        initial=start_epoch,
+        desc="epoch",
+        disable=not config.progress,
+    )
+    for epoch in epoch_bar:
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         val_error = evaluate(model, val_loader, device)
         if scheduler is not None:
             scheduler.step()
         history["train_loss"].append(train_loss)
         history["val_l2_error"].append(val_error)
+        epoch_bar.set_postfix(
+            train_loss=f"{train_loss:.4e}", val_l2_error=f"{val_error:.4e}"
+        )
         if run is not None:
             run.log(
                 {"epoch": epoch, "train_loss": train_loss, "val_l2_error": val_error}

@@ -172,17 +172,23 @@ def search_hyperparams(
     """
     space = search_space or SearchSpace()
     candidates = _select_candidates(space, strategy, n_trials, seed)
+    n_candidates = len(candidates)
 
     trials: list[SearchTrial] = []
     best_hp = candidates[0]
     best_score = float("inf")
 
-    for hp in candidates:
+    for i, hp in enumerate(candidates, start=1):
+        print(f"[fno-search] [{i}/{n_candidates}] start {asdict(hp)}")
         results = _run_trial(
             equation, file_path_or_paths, hp, n_train, n_test, epochs, device
         )
         scores = {r.name: r.test_l2_error for r in results}
         combined_score = sum(scores.values())
+        print(
+            f"[fno-search] [{i}/{n_candidates}] done  {scores} "
+            f"(combined={combined_score:.4f})"
+        )
         trials.append(
             SearchTrial(
                 hyperparams=asdict(hp), scores=scores, combined_score=combined_score

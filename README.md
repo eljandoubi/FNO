@@ -52,6 +52,8 @@ uv run fno-benchmark --equation darcy     # train + compare FNO / DeepONet / PIN
 uv run fno-pipeline --run-dir runs/demo   # or: run everything end to end, resumably
 ```
 
+If you have [`just`](https://github.com/casey/just) installed, the same three commands are `just download pdebench-darcy2d`, `just benchmark --equation darcy`, `just pipeline --run-dir runs/demo` (see [Development](#development) for the full recipe list).
+
 ## Project Layout
 
 ```
@@ -162,6 +164,8 @@ history = train_pinn_navier_stokes(
 uv run fno-benchmark --equation darcy --n-train 512 --n-test 64 --epochs 20 --pinn-epochs 500
 ```
 
+Each model's training shows a live per-epoch `tqdm` bar (train loss, val $L^2$ error, ETA); the comparison table below prints once everything finishes:
+
 ```
 Model                           Params   Train (s)  Infer (ms)   Test L2   Superres L2
 --------------------------------------------------------------------------------------
@@ -223,6 +227,8 @@ Two dependency-free strategies (`--strategy`), not a general HPO framework. Rank
     --strategy random --n-trials 4
   ```
 
+Each candidate prints a `start`/`done` progress line (with its scores) as it runs, on top of the per-epoch `tqdm` bar from its training, so a long search never runs silently.
+
 PINN is always skipped during search (it fits one instance, not an operator, so it doesn't share these hyperparameters meaningfully, and it's cheap enough to just run once at full scale).
 
 **The "search on a subset, then train on the full data" workflow is automated end to end via `fno-pipeline --search`.** See [Pipeline](#pipeline) below: it runs the search first, saves the winner, and feeds it straight into the full-data benchmark step.
@@ -276,6 +282,8 @@ Useful flags: `--equation` (repeatable, defaults to all three), `--data-root`, `
 uv run pytest -v    # unit tests
 uv run ruff check   # lint
 ```
+
+A [`justfile`](justfile) wraps these (plus every CLI above) as shortcuts, e.g. `just test`, `just lint`, `just ci` (lint + test), `just benchmark --equation darcy`. Run `just --list` (or bare `just`) to see all recipes; requires [`just`](https://github.com/casey/just).
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs both on every push/PR to `main` via GitHub Actions. Real-data-conditional tests are skipped there (no PDEBench data is downloaded in CI); they run locally once you've run `fno-download`.
 
